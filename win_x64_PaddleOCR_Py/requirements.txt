@@ -1,0 +1,8 @@
+# 本插件独立 Python 环境依赖（Windows / CPU）
+# 由 uv 安装到同目录 .venv/，Umi-OCR 本体不受影响。
+# 实测版本（2026-07-17）：
+# ⚠️ paddlepaddle 必须 ==3.2.1！3.3.x 的 PIR+oneDNN 兼容性 bug 会导致
+#    MKLDNN 推理崩溃 (ConvertPirAttribute2RuntimeAttribute ArrayAttribute)。
+#    详见 PaddlePaddle issue #77340 / PaddleOCR #17869
+paddlepaddle==3.2.1
+paddleocr==3.7.0

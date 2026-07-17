@@ -1,0 +1,1 @@
+# Placeholder; engine downloads latest PP-OCR models automatically.

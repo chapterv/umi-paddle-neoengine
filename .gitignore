@@ -1,0 +1,6 @@
+# 运行期生成，不入库
+.venv/
+paddlex/
+__pycache__/
+*.log
+engine_active.log
