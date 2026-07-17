@@ -17,7 +17,7 @@
 | `PPOCR_umi.py` | Umi-OCR 插件接口 `class Api`（标准契约） |
 | `PPOCR_config.py` / `i18n.csv` | 引擎设置面板（语言下拉框、方向分类、边长限制等） |
 | `models/configs.txt` + `config_*.txt` | **仅驱动语言下拉框**，引擎不读其内容；真实模型由 paddle 自动下载 |
-| `requirements.txt` | `paddlepaddle==3.3.1` + `paddleocr==3.7.0` |
+| `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` |
 | `.venv/` | 隔离 Python 环境（含 paddle，已装；**不进 git**） |
 
 ## 使用方法（Umi-OCR GUI）
@@ -30,9 +30,19 @@
 5. 拖入图片或粘贴截图即可识别。
 
 ## 已知约束（务必阅读）
-- **MKL-DNN 已强制关闭**：paddle 3.3.1 的 oneDNN 在当前 Windows/CPU 构建下推理期崩溃
-  （`ConvertPirAttribute2RuntimeAttribute ... onednn`），故引擎忽略 Umi-OCR 下发的 `enable_mkldnn`
-  （即使 GUI 勾选也无效），走原生 CPU。功能正常，仅少了 MKLDNN 加速。
+- **MKLDNN 默认开启（已修复）**：paddle 3.3.x 的 oneDNN 在 Windows/CPU 下推理期崩溃
+  （`ConvertPirAttribute2RuntimeAttribute ... onednn`），故本插件**锁定 paddlepaddle==3.2.1**
+  （该版本已修复此 PIR bug）。`enable_mkldnn` 默认 True，GUI 勾选即生效，正常加速。
+  ⚠️ 切勿升级到 3.3.x，否则 MKLDNN 会崩溃。
+- **904 修复**：paddle/oneDNN 会在 stdout 打印 `[ReduceMeanCheckIfOneDNNSupport]` 诊断信息，
+  污染 Umi-OCR 的 JSON 结果行导致「904 反序列化失败」。引擎已在每次推理期间把 stdout
+  临时重定向到 stderr（`os.dup2`），仅干净 JSON 走 stdout，彻底规避。
+- **ONNX Runtime 可用（绕过 oneDNN）**：`--engine onnxruntime` + `CPUExecutionProvider`，
+  不报 904、识别正确。**关键点**：ONNX 在 paddle **3.2.1 与 3.3.1（最新）都可用**；而 3.3.1
+  的 MKLDNN 会崩溃，故 **3.3.1 下 ONNX 是唯一的加速路径**（想用最新 paddle 就切 ONNX）。
+  同图热缓存实测（1184×554）：V6≈10.8s / V4≈11.0s@3.3.1，V6≈9.6s / V4≈9.0s@3.2.1
+  （paddle 版本对 ONNX 速度影响极小）；仍略慢于 3.2.1 的 MKLDNN 热推理（~8s/7.33s，UI 实测）。
+  OpenVINO EP 本机不可用。
 - **语言 → 模型代自动回退**：PP-OCRv6 覆盖 简/繁/英/日 + 拉丁语系；**韩文、俄文 v6 不支持，
   自动回退到 PP-OCRv5**（同为本代最新多语模型，识别正常）。
 - **俄文键是 `ru`**：paddleocr 3.x 的俄文用户态 lang 码是 `ru`（内部映射 `cyrillic`），
