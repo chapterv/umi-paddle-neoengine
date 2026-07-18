@@ -115,6 +115,19 @@ globalOptions = {
             "3.3.x 版本存在 PIR 兼容性 bug 导致崩溃。"
         ),
     },
+    "engine": {
+        "title": tr("推理引擎"),
+        "optionsList": [
+            ["paddle", "Paddle (MKLDNN) 默认"],
+            ["onnxruntime", "ONNX Runtime（绕过 oneDNN）"],
+        ],
+        "default": "paddle",
+        "toolTip": tr(
+            "Paddle (MKLDNN)：Paddle 原生后端，oneDNN 加速，3.2.1 下稳定。\n"
+            "ONNX Runtime：绕过 oneDNN，可避免 3.3.x 的 MKLDNN 崩溃；"
+            "速度相当，可作对照 / 兜底。"
+        ),
+    },
     "cpu_threads": {
         "title": tr("线程数"),
         "default": _threads,

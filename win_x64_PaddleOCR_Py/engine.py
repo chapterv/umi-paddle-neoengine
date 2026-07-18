@@ -18,8 +18,9 @@
 #         传入 ocr.ocr() 前给图像四边加 50px 白色边距；返回后从 box 坐标中减去偏移量。
 #         Umi-OCR 上层完全无感。
 #      6) base64 临时文件改用 .jpg 后缀（减小体积、避免 PNG 编码伪影）
-#   C. 约束不变：
-#      oneDNN/MKLDNN 强制关闭（paddle 3.3.1 Windows CPU 构建推理期崩溃）
+#   C. 约束修正：
+#      MKLDNN 默认开启（paddle 3.2.1 已修复 oneDNN 崩溃；paddle 3.3.x 会崩，切勿升级）。
+#      另：推理期 stdout 临时重定向 stderr，规避 [ReduceMeanCheckIfOneDNNSupport] 致 904。
 
 import os
 import sys
@@ -111,8 +112,10 @@ limit_side_len = int(args.limit_side_len)
 enable_mkldnn = to_bool(args.enable_mkldnn)  # paddlepaddle 3.2.1 已修复 PIR+oneDNN bug，默认开启加速
 
 # ── 引擎后端（路径二）────────────────────────────────────────────
-# engine=None → paddle 默认后端（走 MKLDNN）；engine='onnxruntime' → 绕开 MKLDNN。
-ENGINE = getattr(args, "engine", None)
+# engine 为 None / "paddle" / "mkldnn" / 空 → paddle 原生后端（走 MKLDNN）；
+# engine=='onnxruntime' → 绕开 MKLDNN，用 onnxruntime 推理。
+ENGINE = (getattr(args, "engine", None) or "").strip().lower()
+IS_ONNX = (ENGINE == "onnxruntime")
 _engine_config_raw = getattr(args, "engine_config", None)
 ENGINE_CONFIG = None
 if _engine_config_raw:
@@ -121,10 +124,10 @@ if _engine_config_raw:
     except Exception:
         sys.stderr.write(f"[engine] engine_config 解析失败，忽略：{_engine_config_raw!r}\n")
         ENGINE_CONFIG = None
-if ENGINE == "onnxruntime" and ENGINE_CONFIG is None:
+if IS_ONNX and ENGINE_CONFIG is None:
     ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
 # onnxruntime 后端不使用 MKLDNN；保持 enable_mkldnn=False 避免混淆
-if ENGINE == "onnxruntime":
+if IS_ONNX:
     enable_mkldnn = False
 
 # ocr_version：优先加载的版本（默认 v4 mobile 最快，可选 v6 精度最高）
@@ -149,8 +152,8 @@ def build_ocr():
                 cpu_threads=cpu_threads,
                 text_det_limit_side_len=limit_side_len,
                 text_det_limit_type="max",  # 只缩小不放大：细图按原生尺寸跑，避免被放大 40+ 倍导致极慢
-                **({"engine": ENGINE, "engine_config": ENGINE_CONFIG}
-                   if ENGINE else {}),
+                **({"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
+                   if IS_ONNX else {}),
             )
             sys.stderr.write(
                 f"[engine] 已加载：{ver} / lang={lang} / cls={use_cls} "

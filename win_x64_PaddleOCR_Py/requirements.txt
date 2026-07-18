@@ -6,3 +6,6 @@
 #    详见 PaddlePaddle issue #77340 / PaddleOCR #17869
 paddlepaddle==3.2.1
 paddleocr==3.7.0
+# ONNX Runtime 后端（--engine onnxruntime）可选项：绕过 oneDNN，避免 3.3.x 的 MKLDNN 崩溃。
+# 装后即可在 GUI「推理引擎」里切到 ONNX Runtime；与 paddlepaddle 版本无关，3.2.1 上同样可用。
+onnxruntime==1.27.0
