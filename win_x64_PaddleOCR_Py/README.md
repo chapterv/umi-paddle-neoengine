@@ -39,9 +39,11 @@
   临时重定向到 stderr（`os.dup2`），仅干净 JSON 走 stdout，彻底规避。
 - **ONNX Runtime 可用（绕过 oneDNN）**：`--engine onnxruntime` + `CPUExecutionProvider`，
   不报 904、识别正确。**关键点**：ONNX 在 paddle **3.2.1 与 3.3.1（最新）都可用**；而 3.3.1
-  的 MKLDNN 会崩溃，故 **3.3.1 下 ONNX 是唯一的加速路径**（想用最新 paddle 就切 ONNX）。
+  的 MKLDNN 会崩溃，故 **想在 3.3.1 用最新 paddle 只能切 ONNX 才能正常出结果**
+  （ONNX 绕过 oneDNN、不崩，但属兜底而非加速）。
   同图热缓存实测（1184×554）：V6≈10.8s / V4≈11.0s@3.3.1，V6≈9.6s / V4≈9.0s@3.2.1
-  （paddle 版本对 ONNX 速度影响极小）；仍略慢于 3.2.1 的 MKLDNN 热推理（~8s/7.33s，UI 实测）。
+  （paddle 版本对 ONNX 速度影响极小）；**比 3.2.1 的 MKLDNN 热推理（~8s/7.33s，UI 实测）还慢，
+  ONNX 是「绕开崩溃的兜底路径」，不是更快的路径**。
   OpenVINO EP 本机不可用。
 - **语言 → 模型代自动回退**：PP-OCRv6 覆盖 简/繁/英/日 + 拉丁语系；**韩文、俄文 v6 不支持，
   自动回退到 PP-OCRv5**（同为本代最新多语模型，识别正常）。
