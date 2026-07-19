@@ -1,11 +1,23 @@
-# 本插件独立 Python 环境依赖（Windows / CPU）
+# 本插件独立 Python 环境依赖（Windows · 单一插件同时支持 paddle(MKLDNN) / ONNX-CPU / ONNX-CUDA）
 # 由 uv 安装到同目录 .venv/，Umi-OCR 本体不受影响。
 # 实测版本（2026-07-17）：
 # ⚠️ paddlepaddle 必须 ==3.2.1！3.3.x 的 PIR+oneDNN 兼容性 bug 会导致
-#    MKLDNN 推理崩溃 (ConvertPirAttribute2RuntimeAttribute ArrayAttribute)。
+#    MKLDNN 推理崩溃 (ConvertPirAttribute2RuntimeAttribute [pir::ArrayAttribute])。
 #    详见 PaddlePaddle issue #77340 / PaddleOCR #17869
 paddlepaddle==3.2.1
 paddleocr==3.7.0
-# ONNX Runtime 后端（--engine onnxruntime）可选项：绕过 oneDNN，避免 3.3.x 的 MKLDNN 崩溃。
-# 装后即可在 GUI「推理引擎」里切到 ONNX Runtime；与 paddlepaddle 版本无关，3.2.1 上同样可用。
-onnxruntime==1.27.0
+# 推理后端（由 GUI「推理引擎」下拉框选择）：
+#   - Paddle(MKLDNN) CPU：默认，paddle 原生 oneDNN 后端。
+#   - ONNX Runtime CPU / ONNX Runtime CUDA GPU：统一用 onnxruntime-gpu 包。
+#     onnxruntime-gpu **内含 CPUExecutionProvider**，故单个包即同时覆盖
+#     「onnxruntime」与「onnxruntime-gpu」两种引擎选择，无需再单独装 onnxruntime。
+#     [cuda,cudnn] extras 自动把 CUDA 12.x + cuDNN 9 的 DLL 装进 .venv
+#     （**无需系统装 CUDA Toolkit**）；选 CUDA 但本机不可用（驱动/CUDA 版本不匹配）时，
+#     engine.py 自动回退 CPUExecutionProvider，功能正常只是无 GPU 提速。
+# 默认锁 CUDA 12.x：兼容本机 RTX 3070 Ti + 驱动 576.57（最高到 CUDA 12.9）。
+onnxruntime-gpu[cuda,cudnn]==1.26.0
+# ── 备选（按需替换上面一行）──
+# 驱动支持 CUDA 13（R580+）的环境，可改用 1.27.0（CUDA 13 + cuDNN 9）：
+#   onnxruntime-gpu[cuda,cudnn]==1.27.0
+# 纯 CPU、确定不用 CUDA 的环境，可换更轻量的 CPU 专用包（不含 CUDA DLL）：
+#   onnxruntime==1.27.0

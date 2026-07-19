@@ -91,41 +91,73 @@ def _getRamMax():
 
 _ramMax = _getRamMax()
 
+# 三态选项：开启 / 关闭 / 使用全局参数（截图等窗口级覆盖全局）
+_THREE_STATE = [
+    ["on", "开启"],
+    ["off", "关闭"],
+    ["global", "使用全局参数"],
+]
+
+
 globalOptions = {
-    "title": tr("PaddleOCR·PP-OCRv6/v4（新引擎）"),
+    # Part 2：统一后的全局标题（原 CPU 版“（新引擎）”/ GPU 版“（GPU·CUDA）”合并为一个）
+    "title": tr("PaddleOCR（本地·PP-OCRv6/v5/v4）"),
     "type": "group",
-    "ocr_version": {
-        "title": tr("模型版本"),
-        "optionsList": [
-            ["PP-OCRv4", "v4 mobile（快速·默认）"],
-            ["PP-OCRv6", "v6 medium（高精度）"],
-        ],
-        "default": "PP-OCRv4",
-        "toolTip": tr(
-            "v4 mobile：速度快约 2.7 倍，适合日常截图/文档。\n"
-            "v6 medium：识别精度更高，但速度较慢。"
-        ),
-    },
-    "enable_mkldnn": {
-        "title": tr("启用MKL-DNN加速"),
-        "default": True,
-        "toolTip": tr(
-            "Intel oneDNN 加速，实测提速 2~3.5 倍（V6: 30s→8.5s, V4: 17s→9s）。"
-            "需要 paddlepaddle==3.2.1（已锁定在 requirements.txt），"
-            "3.3.x 版本存在 PIR 兼容性 bug 导致崩溃。"
-        ),
-    },
+    # ── 推理引擎（二级目录）：paddle / onnx-cpu / onnx-cuda，切换后下方相关项含义随之变化 ──
     "engine": {
         "title": tr("推理引擎"),
         "optionsList": [
-            ["paddle", "Paddle (MKLDNN) 默认"],
-            ["onnxruntime", "ONNX Runtime（绕过 oneDNN）"],
+            ["paddle", "Paddle (MKLDNN) CPU（默认）"],
+            ["onnxruntime", "ONNX Runtime CPU"],
+            ["onnxruntime-gpu", "ONNX Runtime CUDA GPU"],
         ],
         "default": "paddle",
         "toolTip": tr(
-            "Paddle (MKLDNN)：Paddle 原生后端，oneDNN 加速，3.2.1 下稳定。\n"
-            "ONNX Runtime：绕过 oneDNN，可避免 3.3.x 的 MKLDNN 崩溃；"
-            "速度相当，可作对照 / 兜底。"
+            "Paddle (MKLDNN)：Paddle 原生 oneDNN CPU 后端，3.2.1 下稳定，默认。\n"
+            "ONNX Runtime CPU：绕过 oneDNN，可作对照 / 兜底。\n"
+            "ONNX Runtime CUDA GPU：优先用 CUDA 提速（依赖随包装进 venv，"
+            "无需系统装 CUDA Toolkit；不可用时自动回退 CPU）。"
+        ),
+    },
+    "ocr_version": {
+        "title": tr("模型版本"),
+        "optionsList": [
+            ["PP-OCRv6", "v6 medium（高精度·默认）"],
+            ["PP-OCRv4", "v4 mobile（快速）"],
+            ["PP-OCRv5", "v5（多语言·韩/俄）"],
+        ],
+        "default": "PP-OCRv6",
+        "toolTip": tr(
+            "v6 medium：识别精度最高，默认使用该版本。\n"
+            "v4 mobile：速度快约 2.7 倍，适合日常截图/文档。\n"
+            "v5：支持韩语/俄语等 PP-OCRv6 未覆盖的语言。"
+        ),
+    },
+    # ── 版本回退链（三个框，按顺序尝试；GPU/ONNX 不可用时依次回退）──
+    "fallback_1": {
+        "title": tr("版本回退链 ①"),
+        "default": "PP-OCRv6",
+    },
+    "fallback_2": {
+        "title": tr("版本回退链 ②"),
+        "default": "PP-OCRv5",
+    },
+    "fallback_3": {
+        "title": tr("版本回退链 ③"),
+        "default": "PP-OCRv4",
+    },
+    # ── MKL-DNN：仅 Paddle(MKLDNN) 后端生效；ONNX 自动忽略 ──
+    "enable_mkldnn": {
+        "title": tr("启用 MKL-DNN 加速"),
+        "optionsList": [
+            ["on", "开启"],
+            ["off", "关闭"],
+            ["na", "不适用·仅Paddle有效"],
+        ],
+        "default": "on",
+        "toolTip": tr(
+            "Intel oneDNN 加速，实测提速 2~3.5 倍（仅 Paddle(MKLDNN) 后端生效）。\n"
+            "选 ONNX Runtime（CPU/GPU）时此选项不适用，引擎自动忽略。"
         ),
     },
     "cpu_threads": {
@@ -150,19 +182,40 @@ globalOptions = {
         "isInt": True,
         "toolTip": tr("值>0时启用。引擎空闲时间超过该值时，执行内存清理。"),
     },
+    # ── 文档预处理：三个功能打组放一起（全局基线）──
+    "doc_preprocess": {
+        "title": tr("文档预处理（方向纠正 / 去扭曲）"),
+        "type": "group",
+        "use_doc_orientation": {
+            "title": tr("文档方向纠正"),
+            "default": True,
+            "toolTip": tr(
+                "整图方向分类（0°/90°/180°/270°），纠正横屏/倒置的文档图片。默认开。"
+            ),
+        },
+        "use_doc_unwarping": {
+            "title": tr("文档去扭曲(矫正)"),
+            "default": True,
+            "toolTip": tr(
+                "曲面文档展平（UVDoc），纠正弯曲/拍照畸变的书页。默认开。"
+            ),
+        },
+        "use_textline_orientation": {
+            "title": tr("纠正文本方向"),
+            "default": True,
+            "toolTip": tr(
+                "逐行方向分类（0°/180°），纠正倒置的文本行（如竖排/反向扫描的中日韩文）。默认开。"
+            ),
+        },
+    },
 }
 
 localOptions = {
-    "title": tr("文字识别（PaddleOCR·新·v4/v6）"),
+    "title": tr("文字识别（PaddleOCR·v6/v5/v4）"),
     "type": "group",
     "language": {
         "title": tr("语言/模型库"),
         "optionsList": _LanguageList,
-    },
-    "cls": {
-        "title": tr("纠正文本方向"),
-        "default": False,
-        "toolTip": tr("启用方向分类，识别倾斜或倒置的文本。可能降低识别速度。"),
     },
     "limit_side_len": {
         "title": tr("限制图像边长"),
@@ -177,5 +230,28 @@ localOptions = {
             "将边长大于该值的图片进行压缩以提高速度。值越大精度越高但越慢；"
             "1920 适配大多数高 DPI 屏幕，960 适合纯速度优先场景。"
         ),
+    },
+    # ── 文档预处理（窗口级覆盖，默认『使用全局参数』）──
+    "doc_preprocess_local": {
+        "title": tr("文档预处理（覆盖全局）"),
+        "type": "group",
+        "use_doc_orientation": {
+            "title": tr("文档方向纠正"),
+            "optionsList": _THREE_STATE,
+            "default": "global",
+            "toolTip": tr("开启 / 关闭 / 使用全局参数。默认『使用全局参数』沿用全局设置。"),
+        },
+        "use_doc_unwarping": {
+            "title": tr("文档去扭曲(矫正)"),
+            "optionsList": _THREE_STATE,
+            "default": "global",
+            "toolTip": tr("开启 / 关闭 / 使用全局参数。默认『使用全局参数』沿用全局设置。"),
+        },
+        "use_textline_orientation": {
+            "title": tr("纠正文本方向"),
+            "optionsList": _THREE_STATE,
+            "default": "global",
+            "toolTip": tr("开启 / 关闭 / 使用全局参数。默认『使用全局参数』沿用全局设置。"),
+        },
     },
 }

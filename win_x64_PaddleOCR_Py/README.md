@@ -8,9 +8,10 @@
 > 推理，复用 Umi-OCR 自带的 `PPOCR_umi` / `PPOCR_api` JSON 管道。
 > 旧引擎 `win7_x64_PaddleOCR-json` 保留作为回退，本插件是「新增可选引擎」。
 
-## 两条路线（同一文件夹 · 两种后端）
-本插件**只有 `win_x64_PaddleOCR_Py` 这一个文件夹**；**MKLDNN 与 ONNX 是同一个 `engine.py` 的两种推理后端**，
-靠 `--engine` 参数（GUI「推理引擎」下拉框）切换。**两个发布包（MKLDNN 版 / ONNX 版）共用这套代码**，不拆目录：
+## 三种后端（同一文件夹 · 单一插件）
+本插件**只有 `win_x64_PaddleOCR_Py` 这一个文件夹、一个 `engine.py`**；**paddle(MKLDNN) / ONNX-CPU / ONNX-CUDA
+是同一个 `engine.py` 的三种推理后端**，靠 `--engine` 参数（GUI「推理引擎」下拉框）切换。
+**不拆目录、不拆插件**，一份代码覆盖全部后端：
 
 - **路线一 · 纯 MKLDNN（默认 · 本项目正解）**：`--engine paddle`（或默认/空）。Paddle 原生后端 + Intel oneDNN（MKLDNN）CPU 加速。
   锁定 `paddlepaddle==3.2.1`（该版已修复 oneDNN 的 PIR 崩溃）；**MKLDNN 默认开启、稳定加速**。
@@ -18,17 +19,21 @@
 - **路线二 · ONNX Runtime（CPU 旁路）**：`--engine onnxruntime`。完全绕开 oneDNN，用 ONNX Runtime 的 `CPUExecutionProvider` 推理。
   用途：① `paddlepaddle==3.3.x`（最新）下 MKLDNN 会崩溃，此时只能切 ONNX 才能正常出结果；
   ② 作为对照 / 兜底。两者纯 CPU、同图速度同量级（见下方实测表），选型看**兼容性**而非速度。
+- **路线三 · ONNX Runtime CUDA GPU**：`--engine onnxruntime-gpu`。优先 `CUDAExecutionProvider`，**不可用时自动回退 CPU**
+  （CUDA 缺失 / cuDNN 未装 / 某 op 不支持均安全降级，功能正常只是无 GPU 提速）。
+  由 `requirements.txt` 中的 `onnxruntime-gpu[cuda,cudnn]` 提供，CUDA 12.x DLL 随包装进 `.venv`，**无需系统装 CUDA Toolkit**；
+  驱动最高仅到 CUDA 12.9 的环境（如 RTX 3070 Ti + 驱动 576.57）用 1.26.0，支持 CUDA 13（R580+）的可换 1.27.0。
 
 ## 文件说明
 | 文件 | 作用 |
 |---|---|
-| `run.cmd` | 引擎入口。Umi-OCR 调它 → 用本目录 `.venv` 的 python 跑 `engine.py` |
+| `run.cmd` | 引擎入口。Umi-OCR 调它 → 用本目录 `.venv_gpu` 的 python 跑 `engine.py` |
 | `engine.py` | **worker**：解析参数 → 建 `PaddleOCR` → `OCR init completed.` 握手 → 逐行读 JSON 识图 |
 | `PPOCR_api.py` | 管道客户端（从 Umi-OCR 自带 Python 运行，不依赖 paddle） |
 | `PPOCR_umi.py` | Umi-OCR 插件接口 `class Api`（标准契约） |
 | `PPOCR_config.py` / `i18n.csv` | 引擎设置面板（语言下拉框、方向分类、边长限制等） |
 | `models/configs.txt` + `config_*.txt` | **仅驱动语言下拉框**，引擎不读其内容；真实模型由 paddle 自动下载 |
-| `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` |
+| `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` + `onnxruntime-gpu[cuda,cudnn]==1.26.0`（默认 CUDA 12.9）/ `1.27.0`（CUDA 13） |
 | `.venv/` | 隔离 Python 环境（含 paddle，已装；**不进 git**） |
 | `paddlex/` | **真实 OCR 模型权重目录**（PP-OCRv4 / v5 / v6 的检测+识别+方向分类模型） |
 
@@ -89,13 +94,33 @@
   旧文档写的 `cyrillic` 会报错，本插件已做映射。
 - **CPU 推理速度**：纯 CPU，大图较慢属正常；可在设置里调大「限制图像边长」或「线程数」。
 
-## 重建 venv（如需）
+## 部署（选择 GPU ONNX Runtime + CUDA 版本）
+**首次使用必须先部署依赖**（创建 `.venv_gpu` 并装入 paddle + paddleocr + onnxruntime-gpu）：
+
+- **推荐：双击根目录 `setup.bat`** → 两段式部署：第 1 步选模型范围，第 2 步选推理后端（GPU / CPU），选 GPU 时第 3 步追问 CUDA 版本：
+  - `[1]` onnxruntime-gpu **1.27.0 + CUDA 13**（新显卡 / 驱动 R580+）
+  - `[2]` onnxruntime-gpu **1.26.0 + CUDA 12.9**（RTX 30/40 系，驱动 ≥535）← 默认
+  - `[3]` 纯 CPU onnxruntime 1.27.0（不用 GPU）
+  - 脚本自动建 `.venv_gpu`、安装、并验证 providers（含 CUDAExecutionProvider 即 GPU 就绪）。
+  - 之后在 Umi-OCR 全局设置 → 推理引擎 选对应项即可。
+- 升级 / 切换 CUDA 版本：重跑 `setup.bat` 选另一个编号，`pip --upgrade` 会自动替换。
+- ⚠️ 若曾用 `uv` 在 git-bash 里以 `/c/...` 路径装依赖，uv 会把路径错拼成 `C:\c\...`
+  产生重复目录（见项目记忆），请用 Windows 原生路径或 `部署.bat` 避免。
+
+## 重建 venv（如需，等效于 部署.bat 的 [2]）
 ```bat
 cd Umi-OCR\UmiOCR-data\plugins\win_x64_PaddleOCR_Py
-uv venv --python 3.11 .venv
+uv venv --python 3.11 .venv_gpu
 uv pip install --python .venv\Scripts\python.exe -r requirements.txt
 ```
 （用 Windows 原生路径调用 uv；git-bash 的 `/c/...` 会被错拼成 `C:\c\...`。）
+
+## 日志与后端标注（排查用）
+引擎每次启动与每次识别都会在 **stderr** 打印，并写入插件目录 `engine_active.log`：
+- 启动：`init_ok ... backend=gpu(onnx-cuda)/cpu(onnx)/cpu(paddle) device=gpu/cpu onnxruntime=x.y.z (/CUDA 12.x) [⚠回退CPU]`
+- 每次识别：`[engine] #N {耗时}s ... backend=... ver=PP-OCRv6 conf={平均置信度:.2f} out_code=... n_text=...`
+- **选中 GPU 引擎但本机 CUDA 不可用时会明确标 `[⚠回退CPU]` 并打 WARN**，功能仍正常（仅无 GPU 提速）；
+  若需真 GPU，重跑 `setup.bat` 选 [1]/[2] 装 onnxruntime-gpu。
 
 ## 验证记录
 端到端跑通：六种语言经真实入口 `run.cmd`（`--config_path models/config_*.txt`）均正确输出

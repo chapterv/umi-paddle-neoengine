@@ -1,4 +1,4 @@
-# engine.py —— Route B 的 Python 引擎 worker（v4 · MKLDNN修复 + 性能优化）
+# engine.py —— Route B 的 Python 引擎 worker（v4 · MKLDNN修复 + 性能优化 + GPU/ONNX 回退）
 #
 # 协议：启动打印 "OCR init completed."；逐行读 stdin JSON → stdout JSON。
 # 运行环境：run.cmd → .venv/python → paddlepaddle **3.2.1** + paddleocr 3.7.0
@@ -8,22 +8,57 @@
 #    详见 https://github.com/PaddlePaddle/paddle/issues/77340
 #
 # v4 变更记录（2026-07-17 21:49 最终迭代）：
-#   A. 性能修复：
-#      1) use_cls 默认 False（对齐 GUI 默认，避免每次多跑角度分类）
-#      2) limit_side_len 默认 1920（适配 Windows 高 DPI，替代过激的 960）
-#      3) 每请求后 gc.collect() 减少内存膨胀、延缓 Umi-OCR ram_max 重启引擎
-#      4) stderr 计时日志（耗时+RSS+结果条数），定位"卡住"环节
-#   B. 精度修复：
-#      5) 自动白边补丁（pad=50）：解决 PP-OCRv6 对紧贴边缘文字（<35px）丢首字的 bug。
-#         传入 ocr.ocr() 前给图像四边加 50px 白色边距；返回后从 box 坐标中减去偏移量。
-#         Umi-OCR 上层完全无感。
-#      6) base64 临时文件改用 .jpg 后缀（减小体积、避免 PNG 编码伪影）
-#   C. 约束修正：
-#      MKLDNN 默认开启（paddle 3.2.1 已修复 oneDNN 崩溃；paddle 3.3.x 会崩，切勿升级）。
-#      另：推理期 stdout 临时重定向 stderr，规避 [ReduceMeanCheckIfOneDNNSupport] 致 904。
-
+#   A. 性能修复：use_cls 默认 False / limit_side_len 默认 1920 / 每请求后 gc / stderr 计时日志
+#   B. 精度修复：自动白边补丁（pad=50，解决 PP-OCRv6 边缘丢首字）
+#   C. 约束修正：MKLDNN 默认开启（paddle 3.2.1 已修复 oneDNN 崩溃）
+#
+# 2026-07-18 GPU 增量（Route A · ONNX + CUDAExecutionProvider）：
+#   - --engine onnxruntime-gpu → providers=["CUDAExecutionProvider","CPUExecutionProvider"]
+#     优先 CUDA，不可用时 **自动回退 CPU**（CUDA 缺失 / cuDNN 未装 / 某 op 不支持均安全降级）。
+#   - --engine onnxruntime → 纯 CPU。
+#   - --fallback_chain（§7）→ 可配置版本回退链，覆盖默认 V6→V5→V4。
+# 2026-07-19 合并为单一插件（CPU/GPU 合一）：本文件同时服务 paddle(MKLDNN) / ONNX-CPU /
+#   ONNX-CUDA 三种后端，由 PPOCR_config.py 的「推理引擎」下拉框选择；requirements.txt 同时
+#   装入 onnxruntime-gpu[cuda,cudnn]，故 CUDA 无需系统级 CUDA Toolkit 即可用，不可用时自动回退。
 import os
 import sys
+
+# 2026-07-19 CUDA DLL 搜索路径修复（仅 Windows，import onnxruntime 之前执行）：
+# onnxruntime-gpu 的 [cuda] extras 会把 nvidia-cublas / cuda-runtime / cudnn / cufft / curand / nvrtc
+#   的 cu12 DLL 自动装进 site-packages/nvidia/<lib>/bin/；但 ORT 的 CUDA EP 在加载
+#   onnxruntime_providers_cuda.dll 时，由 Windows 加载器**静态依赖** cublasLt64_12.dll，
+#   而 ORT 的预载只覆盖了 runtime/cudnn/cufft/curand/nvrtc，**漏了 cublasLt**
+#   → 报 "depends on cublasLt64_12.dll which is missing" (Error 126)，CUDA EP 起不来。
+# 解决（双保险，本段在 import onnxruntime 之前运行）：
+#   ① os.add_dll_directory(nvidia/*/bin)（Py3.8+，加入进程 DLL 搜索路径）；
+#   ② 把同目录并进 os.environ["PATH"] —— **实测①单独在 ORT 内部 LoadLibrary 时不生效，
+#     ②（PATH）才是 Windows 上让 CUDA EP 真正加载 cublasLt 的关键**；两者都加最稳。
+#   注意：site-packages 路径必须用 site.getsitepackages() 取，
+#   不能用 os.path.dirname(os.__file__)（那是 Lib/ 不是 Lib/site-packages，glob 会落空）。
+if os.name == "nt":
+    try:
+        import glob as _glob
+        import site as _site
+        _roots = []
+        try:
+            _roots += _site.getsitepackages()
+        except Exception:
+            pass
+        _roots.append(os.path.join(os.path.dirname(os.__file__), "site-packages"))
+        for _sp in _roots:
+            for _d in _glob.glob(os.path.join(_sp, "nvidia", "*", "bin")):
+                try:
+                    os.add_dll_directory(_d)
+                except OSError:
+                    pass
+                try:
+                    _p = os.environ.get("PATH", "")
+                    if _d not in _p:
+                        os.environ["PATH"] = _d + os.pathsep + _p
+                except Exception:
+                    pass
+    except Exception:
+        pass
 import io
 import json
 import base64
@@ -37,8 +72,9 @@ from PIL import Image
 
 # ── 模型自包含：把 paddle 官方模型缓存重定向到插件自己的 paddlex/ 目录 ──
 # 必须在 import paddleocr 之前设置 PADDLE_PDX_CACHE_HOME（paddlex 读取此变量）。
-# 这样：① 简洁版首次识别自动下载模型到此目录（无需联网后手动搬运）；
+# 这样：① 首次识别自动下载模型到此目录（无需联网后手动搬运）；
 #      ② 懒人版直接预置模型到此目录，解压即用。
+# （GPU 插件可通过目录 junction 共享 CPU 插件的 paddlex/，避免模型存两份。）
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PADDLEX_HOME = os.path.join(_HERE, "paddlex")
 os.makedirs(_PADDLEX_HOME, exist_ok=True)
@@ -59,14 +95,25 @@ parser.add_argument("--limit_side_len", default="1920")
 parser.add_argument("--cpu_threads", default="6")
 parser.add_argument("--enable_mkldnn", default="True")  # paddlepaddle 3.2.1 已修复 PIR bug
 parser.add_argument("--ocr_version", default=None)  # 覆盖默认版本优先级
-# ── 路径二：ONNX Runtime 后端（完全绕过 MKLDNN / oneDNN）─────────
-# engine='onnxruntime' 时，PaddleOCR 自动下载 ONNX 格式模型并使用
-# onnxruntime 推理。engine_config 透传 onnxruntime 的 SessionOptions，
-# 这里只关心 providers（CPU 用 CPUExecutionProvider）。
+# ── 文档预处理开关（默认开，对齐 PaddleOCR 3.x 原生行为；GUI 可关）──
+parser.add_argument("--use_doc_orientation", default=None,
+                    help="文档方向纠正（整图旋转）：None=默认开 / true/false")
+parser.add_argument("--use_doc_unwarping", default=None,
+                    help="文档去扭曲（曲面矫正/UVDoc）：None=默认开 / true/false")
+parser.add_argument("--use_textline_orientation", default=None,
+                    help="纠正文本方向（逐行 0/180°）：None=默认开 / true/false")
+# ── 推理后端 ───────────────────────────────────────────────────────
+# engine=None/paddle/mkldnn/空 → Paddle 原生后端（走 MKLDNN，CPU）；
+# engine=onnxruntime → ONNX Runtime CPU 旁路；
+# engine=onnxruntime-gpu → ONNX Runtime CUDA GPU（不可用时自动回退 CPU）。
 parser.add_argument("--engine", default=None,
-                    help="推理引擎：None=paddle(MKLDNN) / onnxruntime")
+                    help="推理引擎：None=paddle(MKLDNN) / onnxruntime / onnxruntime-gpu")
 parser.add_argument("--engine_config", default=None,
-                    help='JSON 字符串，如 {"providers":["CPUExecutionProvider"]}')
+                    help='JSON 字符串，如 {"providers":["CUDAExecutionProvider","CPUExecutionProvider"]}')
+# ── 可配置版本回退链（§7 fallback_chain）──────────────────────────
+# 逗号分隔，覆盖默认 V6→V5→V4。如 "PP-OCRv6,PP-OCRv4" 去掉 V5。
+parser.add_argument("--fallback_chain", default=None,
+                    help='版本回退链，逗号分隔，如 "PP-OCRv6,PP-OCRv5,PP-OCRv4"；覆盖默认优先级')
 args = parser.parse_args()
 
 
@@ -102,7 +149,9 @@ raw_lang = parse_lang_key(args.config_path)
 lang = LANG_MAP.get(raw_lang, raw_lang)
 
 use_cls = False                          # 对齐 PPOCR_config 默认值
-if args.cls is not None:
+if args.use_textline_orientation is not None:
+    use_cls = to_bool(args.use_textline_orientation)
+elif args.cls is not None:
     use_cls = to_bool(args.cls)
 elif args.use_angle_cls is not None:
     use_cls = to_bool(args.use_angle_cls)
@@ -111,11 +160,11 @@ cpu_threads = int(args.cpu_threads)
 limit_side_len = int(args.limit_side_len)
 enable_mkldnn = to_bool(args.enable_mkldnn)  # paddlepaddle 3.2.1 已修复 PIR+oneDNN bug，默认开启加速
 
-# ── 引擎后端（路径二）────────────────────────────────────────────
-# engine 为 None / "paddle" / "mkldnn" / 空 → paddle 原生后端（走 MKLDNN）；
-# engine=='onnxruntime' → 绕开 MKLDNN，用 onnxruntime 推理。
+# ── 引擎后端（ONNX Runtime）────────────────────────────────────────
+# onnxruntime / onnxruntime-gpu 都走 ONNX Runtime 后端；
+# 区别仅在于 provider：gpu 版优先 CUDA，不可用时自动回退 CPU。
 ENGINE = (getattr(args, "engine", None) or "").strip().lower()
-IS_ONNX = (ENGINE == "onnxruntime")
+IS_ONNX = (ENGINE in ("onnxruntime", "onnxruntime-gpu"))
 _engine_config_raw = getattr(args, "engine_config", None)
 ENGINE_CONFIG = None
 if _engine_config_raw:
@@ -125,21 +174,116 @@ if _engine_config_raw:
         sys.stderr.write(f"[engine] engine_config 解析失败，忽略：{_engine_config_raw!r}\n")
         ENGINE_CONFIG = None
 if IS_ONNX and ENGINE_CONFIG is None:
-    ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
+    # ── GPU + 可选择 fallback 规则 ──
+    # onnxruntime-gpu：优先 CUDAExecutionProvider，不可用时自动回退 CPUExecutionProvider
+    #   （CUDA 缺失 / cuDNN 未装 / 某 op 在 CUDA 不被支持时，ORT 自动降级 CPU，插件照常工作）。
+    # onnxruntime：纯 CPU。
+    if ENGINE == "onnxruntime-gpu":
+        ENGINE_CONFIG = {"providers": ["CUDAExecutionProvider", "CPUExecutionProvider"]}
+    else:
+        ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
 # onnxruntime 后端不使用 MKLDNN；保持 enable_mkldnn=False 避免混淆
 if IS_ONNX:
     enable_mkldnn = False
 
-# ocr_version：优先加载的版本（默认 v4 mobile 最快，可选 v6 精度最高）
+# ── 后端标签（供日志/输出标注 cpu/gpu + 模型版本）──
+ENGINE_LABEL = "?"   # 如 gpu(onnx-cuda) / cpu(onnx) / cpu(paddle)
+DEVICE = "?"         # gpu / cpu
+ORT_VERSION = None   # onnxruntime 版本
+CUDA_VER = None      # 检测到的 CUDA 版本（如 12.x）
+
+
+def _detect_cuda_version():
+    """从已装的 nvidia-cuda-runtime-cu1x 包探测 CUDA 大版本。"""
+    try:
+        import importlib.metadata as _md
+        for pkg, maj in (("nvidia-cuda-runtime-cu13", "13"),
+                         ("nvidia-cuda-runtime-cu12", "12")):
+            try:
+                v = _md.version(pkg)
+                return f"{maj}.x ({v})"
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return None
+
+
+def _resolve_engine_label():
+    """返回 (ENGINE_LABEL, DEVICE, ORT_VERSION, CUDA_VER)。"""
+    if not IS_ONNX:
+        return "cpu(paddle)", "cpu", None, None
+    try:
+        import onnxruntime as ort
+        ov = ort.__version__
+        cv = _detect_cuda_version()
+        using_cuda = bool(ENGINE_CONFIG) and "CUDAExecutionProvider" in ENGINE_CONFIG.get("providers", [])
+        if using_cuda:
+            return "gpu(onnx-cuda)", "gpu", ov, cv
+        return "cpu(onnx)", "cpu", ov, cv
+    except Exception:
+        return "cpu(onnx?)", "cpu", None, None
+
+# ── 文档预处理开关（默认开，对齐 PaddleOCR 3.x 默认；None=开）──────
+_use_doc_ori = getattr(args, "use_doc_orientation", None)
+use_doc_orientation = True if _use_doc_ori is None else to_bool(_use_doc_ori)
+_use_doc_unwarp = getattr(args, "use_doc_unwarping", None)
+use_doc_unwarping = True if _use_doc_unwarp is None else to_bool(_use_doc_unwarp)
+
+# ocr_version：优先加载的版本（默认 v6 medium 精度最高；v5 回退用于韩/俄等 v6 未覆盖语言；v4 兜底最快）
 _ocr_version_arg = getattr(args, "ocr_version", None)
-DEFAULT_VERSION = "PP-OCRv4"
-VERSION_PRIORITY = [DEFAULT_VERSION, "PP-OCRv6", "PP-OCRv5"]
+DEFAULT_VERSION = "PP-OCRv6"
+VERSION_PRIORITY = [DEFAULT_VERSION, "PP-OCRv5", "PP-OCRv4"]
 if _ocr_version_arg and _ocr_version_arg.strip():
     VERSION_PRIORITY = [_ocr_version_arg.strip()] + [v for v in VERSION_PRIORITY if v != _ocr_version_arg.strip()]
+# ── 可配置版本回退链（§7 fallback_chain）──
+# 覆盖默认优先级；如 "PP-OCRv6,PP-OCRv5,PP-OCRv4"。
+# 用户可去掉 V5/V4 或调整顺序，无需改代码。GPU/ONNX 不可用时按此链回退到下一版本。
+_fc = getattr(args, "fallback_chain", None)
+if _fc and _fc.strip():
+    VERSION_PRIORITY = [v.strip() for v in _fc.split(",") if v.strip()]
+    sys.stderr.write(f"[engine] 使用自定义回退链：{VERSION_PRIORITY}\n")
 
 
 def build_ocr():
     """按 VERSION_PRIORITY 依次尝试加载，首个成功即用。"""
+    # 报告 ONNX 后端实际可用的 provider，并按可用性**最终决定**用哪个 provider：
+    #   - onnxruntime-gpu 且 CUDAExecutionProvider 可用 → 优先 CUDA，CPU 兜底；
+    #   - onnxruntime-gpu 但 CUDA 不可用（没装 onnxruntime-gpu / 驱动不匹配 / 缺 DLL）
+    #     → 自动降级为纯 CPUExecutionProvider，**不再硬崩**，功能正常但无 GPU 提速；
+    #   - onnxruntime → 纯 CPU。
+    # paddlex 在请求到不可用的 provider 时会直接抛异常，所以必须由这里先按可用性收敛。
+    if IS_ONNX:
+        try:
+            import onnxruntime as ort
+            av = ort.get_available_providers()
+            sys.stderr.write(f"[engine] ORT 可用 providers: {av}\n")
+            if ENGINE == "onnxruntime-gpu":
+                if "CUDAExecutionProvider" in av:
+                    ENGINE_CONFIG = {"providers": ["CUDAExecutionProvider", "CPUExecutionProvider"]}
+                    sys.stderr.write("[engine] ✅ CUDAExecutionProvider 可用，启用 GPU 推理。\n")
+                else:
+                    ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
+                    sys.stderr.write(
+                        "[engine][WARN] 本机未检测到 CUDAExecutionProvider"
+                        "（onnxruntime-gpu 未安装，或 CUDA DLL/驱动不可用）。\n"
+                        "         已自动回退 CPUExecutionProvider：功能正常，但无 GPU 提速。\n"
+                        "         若需 GPU：在该插件 .venv 安装 onnxruntime-gpu[cuda,cudnn]==1.26.0"
+                        "（无需系统级 CUDA Toolkit）。\n"
+                    )
+            else:
+                ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
+                sys.stderr.write("[engine] 纯 CPU ONNX 推理。\n")
+        except Exception as e:
+            sys.stderr.write(f"[engine][WARN] 检查 providers 失败，回退 CPU：{e}\n")
+            ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
+    # 解析最终后端标签（cpu/gpu + onnxruntime/CUDA 版本），供日志与输出标注
+    global ENGINE_LABEL, DEVICE, ORT_VERSION, CUDA_VER
+    ENGINE_LABEL, DEVICE, ORT_VERSION, CUDA_VER = _resolve_engine_label()
+    sys.stderr.write(
+        f"[engine] 后端标签：{ENGINE_LABEL} / onnxruntime={ORT_VERSION}"
+        f"{('/CUDA ' + CUDA_VER) if CUDA_VER else ''}\n"
+    )
     last_err = None
     for ver in VERSION_PRIORITY:
         try:
@@ -148,6 +292,8 @@ def build_ocr():
                 lang=lang,
                 ocr_version=ver,
                 use_textline_orientation=use_cls,
+                use_doc_orientation_classify=use_doc_orientation,
+                use_doc_unwarping=use_doc_unwarping,
                 enable_mkldnn=enable_mkldnn,
                 cpu_threads=cpu_threads,
                 text_det_limit_side_len=limit_side_len,
@@ -207,9 +353,9 @@ def _unpad_box(box, pad=PAD):
 
 
 def convert(result):
-    """paddleocr 3.x list[dict] → Umi-OCR {code,data:[{box,score,text}]}."""
+    """paddleocr 3.x list[dict] → Umi-OCR {code,data:[{box,score,text}],backend}."""
     if not result or len(result) == 0:
-        return {"code": 100, "data": []}
+        return {"code": 100, "data": [], "backend": _backend_tag()}
     item = result[0]
     polys = item.get("rec_polys") or item.get("dt_polys") or []
     texts = item.get("rec_texts") or []
@@ -218,7 +364,21 @@ def convert(result):
     for poly, text, score in zip(polys, texts, scores):
         box = _unpad_box(poly)                       # ← 还原坐标
         data.append({"box": box, "score": float(score), "text": str(text)})
-    return {"code": 100, "data": data}
+    return {"code": 100, "data": data, "backend": _backend_tag()}
+
+
+def _backend_tag():
+    """生成简洁后端标签供 UI 显示，如 'gpu v6' / 'cpu(paddle) v6'。"""
+    dev = DEVICE                    # "gpu" / "cpu"
+    eng = ENGINE                    # "paddle" / "onnxruntime" / "onnxruntime-gpu"
+    if eng == "onnxruntime-gpu":
+        eng_short = "cuda"
+    elif eng == "onnxruntime":
+        eng_short = "onnx"
+    else:
+        eng_short = "paddle"
+    ver_short = args.ocr_version.replace("PP-OCRv", "")  # "6" / "5" / "4"
+    return f"{dev}({eng_short}) v{ver_short}"
 
 
 def get_rss_mb():
@@ -262,8 +422,11 @@ def main():
         import datetime
         _log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine_active.log")
         with open(_log, "a", encoding="utf-8") as f:
+            _fb = " [⚠回退CPU]" if (ENGINE == "onnxruntime-gpu" and DEVICE == "cpu") else ""
             f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}  "
                     f"init_ok ver={ver} lang={lang} cls={use_cls} "
+                    f"engine={ENGINE} backend={ENGINE_LABEL} device={DEVICE} "
+                    f"onnxruntime={ORT_VERSION}{('/CUDA '+CUDA_VER) if CUDA_VER else ''}{_fb} "
                     f"limit={limit_side_len} threads={cpu_threads} "
                     f"init_sec={time.time()-t_init:.1f}\n")
     except Exception:
@@ -301,12 +464,6 @@ def main():
 
                 try:
                     # ── 关键修复：推理期间重定向 stdout → stderr ──
-                    # paddle/oneDNN 在 C 层向 stdout 打印
-                    #   [ReduceMeanCheckIfOneDNNSupport]
-                    # 等诊断信息，会污染 Umi-OCR 读取的 JSON 协议首行，
-                    # 导致宿主反序列化失败(904)。这里把 fd1 临时指向 fd2，
-                    # 让这些噪声进 stderr（日志流），推理结束再恢复，
-                    # 保证 stdout 只有唯一的 JSON 结果行。
                     saved_fd = os.dup(1)
                     sys.stdout.flush()
                     os.dup2(2, 1)
@@ -329,9 +486,13 @@ def main():
 
         dt = time.time() - t0
         rss = get_rss_mb()
+        _data = out.get("data") if isinstance(out, dict) else None
+        _scores = [d.get("score", 0) for d in _data if isinstance(d, dict)] if isinstance(_data, list) else []
+        _avg_conf = (sum(_scores) / len(_scores)) if _scores else 0.0
         sys.stderr.write(
             f"[engine] #{req_count} {dt:.2f}s rss={rss}MB "
-            f"out_code={out.get('code')} n_text={len(out.get('data',[]))}\n"
+            f"backend={ENGINE_LABEL} ver={ver} conf={_avg_conf:.2f} "
+            f"out_code={out.get('code')} n_text={len(_scores)}\n"
         )
 
         sys.stdout.write(json.dumps(out, ensure_ascii=True) + "\n")
