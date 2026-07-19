@@ -68,6 +68,7 @@ import gc
 import tempfile
 
 import numpy as np
+import cv2
 from PIL import Image
 
 # ── 模型自包含：把 paddle 官方模型缓存重定向到插件自己的 paddlex/ 目录 ──
@@ -224,15 +225,20 @@ def _resolve_engine_label():
     except Exception:
         return "cpu(onnx?)", "cpu", None, None
 
-# ── 文档预处理开关（默认关，对齐原版 PaddleOCR-json 行为；GUI 可开）──────
-# 原版引擎（PaddleOCR-json）不支持 use_doc_unwarping / use_doc_orientation，
-# 若默认开启会导致坐标偏移（UVDoc 内部几何矫正的逆变换不精确，系统性偏移 20~56px，
-# 且与 padding 白边补丁冲突产生更大错位）。故默认关闭，与原版对齐；
-# 用户有曲面矫正需求时通过 GUI 手动开启。
+# ── 文档预处理开关（由本引擎自管「方向纠正 + 去扭曲」并精确逆映射坐标）──
+# 这两个开关直接来自 GUI / PPOCR_umi（恒为显式 True/False）。
+# 重要背景：paddleocr 3.x 在开启 use_doc_unwarping / use_doc_orientation 时，
+#   内部会对图像做几何变换后再检测，但**不再把检测框逆映射回原图坐标系**
+#   （PaddleOCR 2.x / 旧版 V3 引擎的 DocUnwarping 是会做这一步的）。
+#   这正是一开这些功能、检测框就偏移几十像素、与原图不对齐的根因。
+# 修复：build_ocr 里把这两项恒设为 False（交还 paddleocr 内部预处理，避免重复），
+#   改由下方 preprocess_doc() 自行完成「垫白边 → 方向纠正 → 透视矫正」，
+#   并对检测框做**精确逆变换**映射回原图坐标。→ 功能保持开启、框完美对齐，
+#   且不依赖 paddleocr 3.x 内部被砍掉的逆映射实现。
 _use_doc_ori = getattr(args, "use_doc_orientation", None)
-use_doc_orientation = False if _use_doc_ori is None else to_bool(_use_doc_ori)
+use_doc_orientation = to_bool(_use_doc_ori) if _use_doc_ori is not None else False
 _use_doc_unwarp = getattr(args, "use_doc_unwarping", None)
-use_doc_unwarping = False if _use_doc_unwarp is None else to_bool(_use_doc_unwarp)
+use_doc_unwarping = to_bool(_use_doc_unwarp) if _use_doc_unwarp is not None else False
 
 # ocr_version：优先加载的版本（默认 v6 medium 精度最高；v5 回退用于韩/俄等 v6 未覆盖语言；v4 兜底最快）
 _ocr_version_arg = getattr(args, "ocr_version", None)
@@ -296,8 +302,12 @@ def build_ocr():
                 lang=lang,
                 ocr_version=ver,
                 use_textline_orientation=use_cls,
-                use_doc_orientation_classify=use_doc_orientation,
-                use_doc_unwarping=use_doc_unwarping,
+                # 方向纠正 / 去扭曲 交还本引擎自管（preprocess_doc）：
+                # 这两个开关 paddleocr 3.x 内部开启时会做几何变换，
+                # 但**不再把检测框逆映射回原图**，导致框偏移、不对齐。
+                # 故此处恒为 False，由 preprocess_doc() 完成变换并精确逆映射坐标。
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
                 enable_mkldnn=enable_mkldnn,
                 cpu_threads=cpu_threads,
                 text_det_limit_side_len=limit_side_len,
@@ -377,6 +387,150 @@ def convert(result, was_padded=True):
     return {"code": 100, "data": data, "backend": _backend_tag()}
 
 
+# ======================================================================
+# 文档预处理（方向纠正 + 去扭曲）—— 自管坐标逆映射
+# ----------------------------------------------------------------------
+# 背景：paddleocr 3.x 开启 use_doc_unwarping / use_doc_orientation 时，
+#   内部对图像做几何变换后再检测，但**不再把检测框逆映射回原图坐标系**
+#   （PaddleOCR 2.x / 旧版 V3 引擎的 DocUnwarping 是会做这一步的）。
+#   这正是一开这些功能、检测框就偏移几十像素、与原图不对齐的根因。
+# 修复：build_ocr 把这两项恒设为 False（禁用 paddleocr 内部预处理，避免重复变换），
+#   改由下面的 preprocess_doc() 自行完成「垫白边 → 方向纠正 → 透视矫正」，
+#   并用**精确逆变换**（单应矩阵 H⁻¹、旋转逆阵、去白边）把检测框
+#   映射回原图坐标。→ 功能保持开启、框完美对齐，且不依赖 paddleocr 内部被砍掉的逆映射。
+# 鲁棒性：任一步失败/不适用时对应逆变换退化为恒等，保证框不偏移、不崩溃。
+# ======================================================================
+
+_DOC_PREP_PIPE = None   # None=未建；False=加载失败哨兵
+
+def _load_doc_ori():
+    """惰性构建 doc_preprocessor 管线（仅用于取「方向角度」）。
+
+    为何用整条管线而非直接 jit 加载 PP-LCNet 分类模型：
+      paddleocr 3.x 把方向分类模型打包成**推理图**，
+      `paddle.jit.load` 直接加载会报 KeyError('forward')（没有可直接调用的 Layer）。
+      而 doc_preprocessor 管线由 paddlex 自己负责加载，能正确返回 angle。
+      ⚠️ 该管线内部也含 UVDoc 去扭曲——但我们**只用 angle**，
+         绝不取它的 output_img（那会重新引入「框不回原图」的偏移 bug）。
+         去扭曲由本引擎的 cv2 透视矫正 + 精确逆映射完成。
+    """
+    global _DOC_PREP_PIPE
+    if _DOC_PREP_PIPE is not None:
+        return _DOC_PREP_PIPE
+    try:
+        from paddlex import create_pipeline
+        _DOC_PREP_PIPE = create_pipeline(pipeline="doc_preprocessor")
+        sys.stderr.write("[preproc] doc_preprocessor 管线（取方向角度）已加载。\n")
+    except Exception as e:
+        sys.stderr.write(f"[preproc][WARN] doc_preprocessor 管线加载失败，方向纠正将跳过：{e}\n")
+        _DOC_PREP_PIPE = False
+    return _DOC_PREP_PIPE
+
+
+def _classify_orientation(img_bgr):
+    """返回文档方向角度 0/90/180/270；管线缺失或失败返回 0。"""
+    pipe = _load_doc_ori()
+    if not pipe:
+        return 0
+    try:
+        r = next(iter(pipe.predict(img_bgr)))
+        return int(r.get("angle", 0))
+    except Exception as e:
+        sys.stderr.write(f"[preproc][WARN] 方向分类失败，按 0° 处理：{e}\n")
+        return 0
+
+
+def _order_corners(pts):
+    """把 4 个顶点重排为 左上/右上/右下/左下。"""
+    pts = pts[np.argsort(pts[:, 1])]
+    top, bot = pts[:2], pts[2:]
+    top = top[np.argsort(top[:, 0])]
+    bot = bot[np.argsort(bot[:, 0])]
+    return np.array([top[0], top[1], bot[1], bot[0]], dtype="float32")
+
+
+def _detect_doc_corners(img_bgr):
+    """检测文档四边形顶点（垫白边后的图像坐标）；检测不到返回 None。"""
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 0)
+    edged = cv2.Canny(gray, 75, 200)
+    cnts, _ = cv2.findContours(edged, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+    cnts = sorted(cnts, key=cv2.contourArea, reverse=True)[:5]
+    H, W = img_bgr.shape[:2]
+    for c in cnts:
+        peri = cv2.arcLength(c, True)
+        approx = cv2.approxPolyDP(c, 0.02 * peri, True)
+        if len(approx) != 4:
+            continue
+        pts = approx.reshape(4, 2).astype("float32")
+        x, y, w, h = cv2.boundingRect(pts)
+        # 只接受「像文档」的四边形：面积足够大、长宽比合理，
+        # 避免对截图/UI 误矫正（那种应走恒等、不产生偏移）。
+        if w * h < 0.5 * H * W:
+            continue
+        if not (0.2 < (w / h) < 5.0):
+            continue
+        return pts
+    return None
+
+
+def preprocess_doc(img_bgr, do_ori, do_unwarp, pad=PAD):
+    """自管文档预处理，返回 (pre_img, inv_fn)。
+
+    pre_img : 送 OCR 的图（已垫白边 + 可能的旋转/透视矫正）。
+    inv_fn  : 把 pre_img 坐标系的 4 点框映射回【原图】坐标系
+              （逆透视 → 逆旋转 → 去白边），功能开着时框完美对齐原图。
+    任一步失败/不适用时对应逆变换退化为恒等：框不偏移、不崩溃。
+    """
+    H0, W0 = img_bgr.shape[:2]
+    # 1) 垫白边（避免 V6 边缘丢字；也为后续变换留出边距）
+    padded = np.full((H0 + 2 * pad, W0 + 2 * pad, 3), 255, dtype="uint8")
+    padded[pad:pad + H0, pad:pad + W0] = img_bgr
+    cur = padded
+    M_inv = None   # 逆旋转矩阵（None=未旋转）
+    H_inv = None   # 逆透视矩阵（None=未矫正）
+    # 2) 方向纠正（0/90/180/270）
+    if do_ori:
+        angle = _classify_orientation(cur)
+        if angle not in (0, None):
+            h, w = cur.shape[:2]
+            M = cv2.getRotationMatrix2D((w / 2.0, h / 2.0), -float(angle), 1.0)
+            cur = cv2.warpAffine(cur, M, (w, h), borderValue=(255, 255, 255))
+            M_inv = cv2.invertAffineTransform(M)
+    # 3) 去扭曲（文档四边形透视矫正）
+    if do_unwarp:
+        corners = _detect_doc_corners(cur)
+        if corners is not None:
+            src = _order_corners(corners)
+            w_top = np.linalg.norm(src[1] - src[0])
+            w_bot = np.linalg.norm(src[2] - src[3])
+            h_l = np.linalg.norm(src[3] - src[0])
+            h_r = np.linalg.norm(src[2] - src[1])
+            dw = max(int(round((w_top + w_bot) / 2)), 1)
+            dh = max(int(round((h_l + h_r) / 2)), 1)
+            dst = np.array([[0, 0], [dw, 0], [dw, dh], [0, dh]], dtype="float32")
+            Hm = cv2.getPerspectiveTransform(src, dst)
+            cur = cv2.warpPerspective(cur, Hm, (dw, dh), borderValue=(255, 255, 255))
+            H_inv = np.linalg.inv(Hm)
+    pre_img = cur
+
+    def inv_fn(box):
+        out = []
+        for (x, y) in box:
+            if H_inv is not None:
+                p = np.array([x, y, 1.0], dtype="float64")
+                q = H_inv @ p
+                x, y = q[0] / q[2], q[1] / q[2]
+            if M_inv is not None:
+                p = np.array([x, y, 1.0], dtype="float64")
+                q = M_inv @ p
+                x, y = q[0], q[1]
+            out.append([int(round(x)) - pad, int(round(y)) - pad])
+        return out
+
+    return pre_img, inv_fn
+
+
 def _backend_tag():
     """生成简洁后端标签供 UI 显示，如 'gpu v6' / 'cpu(paddle) v6'。"""
     dev = DEVICE                    # "gpu" / "cpu"
@@ -387,7 +541,9 @@ def _backend_tag():
         eng_short = "onnx"
     else:
         eng_short = "paddle"
-    ver_short = args.ocr_version.replace("PP-OCRv", "")  # "6" / "5" / "4"
+    # args.ocr_version 真实启动由 PPOCR_umi 下发；此处做 None 防御
+    ov = getattr(args, "ocr_version", None) or "PP-OCRv6"
+    ver_short = ov.replace("PP-OCRv", "") if "PP-OCRv" in ov else "6"
     return f"{dev}({eng_short}) v{ver_short}"
 
 
@@ -469,31 +625,39 @@ def main():
                 if is_b64_tmp:
                     tmp_base64 = img
 
-                # 边缘补丁：给图像加白边，避免 PP-OCRv6 对近边缘文字丢首字
-                # ⚠️ 当 use_doc_unwarping=True（UVDoc）时必须跳过补丁：
-                #   UVDoc 内部做几何矫正（单应性变换），检测在矫正后图上跑，
-                #   再逆变换映射回输入坐标系。padding 会破坏这个映射关系，
-                #   导致坐标偏移 20~56px 甚至出现负坐标。
-                _need_pad = not use_doc_unwarping
-                if _need_pad:
-                    tmp_padded = _pad_image(img)
+                # ── 文档预处理（方向纠正 / 去扭曲）由本引擎自管 ──
+                # 开启任一项时，preprocess_doc 完成「垫白边 → 方向纠正 → 透视矫正」，
+                # 并返回 inv_fn 把检测框精确逆映射回【原图】坐标系
+                # （功能保持开启、框完美对齐；paddleocr 内部预处理已在 build_ocr 禁用）。
+                # 两项都关时走原 V6 边缘丢字补丁路径（垫白边，convert 内 unpad）。
+                _do_pre = use_doc_orientation or use_doc_unwarping
+                tmp_padded = None
+                inv_fn = None
+                if _do_pre:
+                    try:
+                        run_img, inv_fn = preprocess_doc(img, use_doc_orientation, use_doc_unwarping)
+                    except Exception as e:
+                        sys.stderr.write(
+                            f"[preproc][WARN] 预处理异常，回退无预处理 OCR：{e}\n"
+                        )
+                        run_img, inv_fn = img, None
                 else:
-                    tmp_padded = img  # UVDoc 模式直接用原图
+                    tmp_padded = _pad_image(img)   # V6 边缘丢字补丁
+                    run_img = tmp_padded
 
                 try:
-                    # ── 关键修复：推理期间重定向 stdout → stderr ──
-                    saved_fd = os.dup(1)
-                    sys.stdout.flush()
-                    os.dup2(2, 1)
-                    try:
-                        result = ocr.ocr(tmp_padded)
-                    finally:
-                        os.dup2(saved_fd, 1)
-                        os.close(saved_fd)
-                    out = convert(result, was_padded=_need_pad)
+                    result = run_ocr_safe(ocr, run_img)
+                    out = convert(result, was_padded=(not _do_pre))
+                    # 预处理开启：把检测框从预处理图坐标系逆映射回原图
+                    if _do_pre and inv_fn is not None:
+                        for _d in out.get("data", []):
+                            try:
+                                _d["box"] = inv_fn(_d["box"])
+                            except Exception as _e:
+                                sys.stderr.write(f"[preproc][WARN] 框逆映射失败跳过：{_e}\n")
                 finally:
-                    # 清理补丁临时文件（仅 padding 产生的临时文件；UVDoc 模式 tmp_padded=原图，不删）
-                    if _need_pad and tmp_padded and tmp_padded != img and os.path.exists(tmp_padded):
+                    # 仅清理 V6 补丁产生的临时文件
+                    if tmp_padded and tmp_padded != img and os.path.exists(tmp_padded):
                         try:
                             os.remove(tmp_padded)
                         except Exception:
