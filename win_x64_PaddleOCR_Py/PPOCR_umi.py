@@ -56,8 +56,12 @@ class Api:  # 公开接口
         # ── 直接透传（全局项）──
         if "engine" in globalData:
             cfg["engine"] = globalData["engine"]
-        if "ocr_version" in globalData:
-            cfg["ocr_version"] = globalData["ocr_version"]
+        # ocr_version：扁平键优先；兼容曾用 group 时的 model_version.ocr_version
+        _ver = globalData.get("ocr_version") or globalData.get(
+            "model_version.ocr_version"
+        )
+        if _ver:
+            cfg["ocr_version"] = _ver
         if "cpu_threads" in globalData:
             cfg["cpu_threads"] = globalData["cpu_threads"]
         # ── 语言 / 限制边长（局部项，仅窗口级有）──
@@ -74,9 +78,14 @@ class Api:  # 公开接口
             cfg["enable_mkldnn"] = True
         elif mkl == "off":
             cfg["enable_mkldnn"] = False
-        # ── 版本回退链（三个框按顺序，去空后逗号拼接）──
-        chain = [globalData.get(f"fallback_{i}", "") for i in (1, 2, 3)]
-        chain = [c for c in chain if c]
+        # ── 版本回退链（扁平 fallback_*；兼容旧 group 键）──
+        chain = []
+        for i in (1, 2, 3):
+            c = globalData.get(f"fallback_{i}") or globalData.get(
+                f"version_fallback.fallback_{i}", ""
+            )
+            if c:
+                chain.append(c)
         if chain:
             cfg["fallback_chain"] = ",".join(chain)
         # ── 文档预处理：全局基线 + 局部三态覆盖 ──
@@ -123,10 +132,13 @@ class Api:  # 公开接口
             return f"[Error] OCR init fail. Argd: {tempConfigs}\n{e}"
         return ""
 
-    def stop(self):  # 停止引擎
-        if self.api == None:
+    def stop(self):  # 停止引擎（必须不抛错，否则语言切换/重配会卡死任务线程）
+        if self.api is None:
             return
-        self.api.exit()
+        try:
+            self.api.exit()
+        except Exception:
+            pass
         self.api = None
 
     def runPath(self, imgPath: str):  # 路径识图

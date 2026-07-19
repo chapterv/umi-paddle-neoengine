@@ -192,6 +192,8 @@ ENGINE_LABEL = "?"   # 如 gpu(onnx-cuda) / cpu(onnx) / cpu(paddle)
 DEVICE = "?"         # gpu / cpu
 ORT_VERSION = None   # onnxruntime 版本
 CUDA_VER = None      # 检测到的 CUDA 版本（如 12.x）
+LOADED_VER = None    # build_ocr 实际加载成功的 ocr_version（回退后可能与请求不同）
+USED_MKLDNN = None  # build_ocr 实际生效的 mkldnn（paddle 后端；回退后可能与请求不同）
 
 
 def _detect_cuda_version():
@@ -208,6 +210,32 @@ def _detect_cuda_version():
     except Exception:
         pass
     return None
+
+
+def _cuda_gpu_present():
+    """用 CUDA 驱动层确认本机**真有**可用 GPU 设备（不只是 onnxruntime 列了 CUDA EP）。
+
+    onnxruntime 的 get_available_providers() 会列出 CUDAExecutionProvider
+    即使它实际跑不起来（CUDA DLL 半残 / 驱动不匹配 / 本机无 GPU），
+    这正是「选了 gpu 却跑 cpu、还标 gpu」的掩耳盗铃根因——
+    本机实测 get_available_providers/get_device 都会**间歇性**把残 CUDA 列为可用。
+    这里下沉到 CUDA 驱动层（nvcuda.dll / cuDeviceGetCount）做硬确认：
+    能加载 nvcuda 且设备数>0 才算真有 GPU。"""
+    try:
+        import ctypes
+        lib = ctypes.CDLL("nvcuda.dll")
+        # ⚠️ 必须先 cuInit(0) 初始化 CUDA 驱动，否则 cuDeviceGetCount
+        #   直接返回 CUDA_ERROR_NOT_INITIALIZED(=3) → 误判「无 GPU」，
+        #   导致本机真有 GPU 也被判成无 → 推理永远回退 CPU（掩耳盗铃反向坑）。
+        if lib.cuInit(0) != 0:
+            return False
+        count = ctypes.c_int(0)
+        if lib.cuDeviceGetCount(ctypes.byref(count)) != 0:
+            return False
+        return count.value > 0
+    except Exception as e:
+        sys.stderr.write(f"[engine][WARN] CUDA 驱动层检测失败（视为无 GPU）：{e}\n")
+        return False
 
 
 def _resolve_engine_label():
@@ -240,23 +268,133 @@ use_doc_orientation = to_bool(_use_doc_ori) if _use_doc_ori is not None else Fal
 _use_doc_unwarp = getattr(args, "use_doc_unwarping", None)
 use_doc_unwarping = to_bool(_use_doc_unwarp) if _use_doc_unwarp is not None else False
 
-# ocr_version：优先加载的版本（默认 v6 medium 精度最高；v5 回退用于韩/俄等 v6 未覆盖语言；v4 兜底最快）
-_ocr_version_arg = getattr(args, "ocr_version", None)
-DEFAULT_VERSION = "PP-OCRv6"
-VERSION_PRIORITY = [DEFAULT_VERSION, "PP-OCRv5", "PP-OCRv4"]
-if _ocr_version_arg and _ocr_version_arg.strip():
-    VERSION_PRIORITY = [_ocr_version_arg.strip()] + [v for v in VERSION_PRIORITY if v != _ocr_version_arg.strip()]
-# ── 可配置版本回退链（§7 fallback_chain）──
-# 覆盖默认优先级；如 "PP-OCRv6,PP-OCRv5,PP-OCRv4"。
-# 用户可去掉 V5/V4 或调整顺序，无需改代码。GPU/ONNX 不可用时按此链回退到下一版本。
-_fc = getattr(args, "fallback_chain", None)
-if _fc and _fc.strip():
-    VERSION_PRIORITY = [v.strip() for v in _fc.split(",") if v.strip()]
-    sys.stderr.write(f"[engine] 使用自定义回退链：{VERSION_PRIORITY}\n")
+# ═════════════════════════════════════════════════════════════════
+# 版本优先级构建（核心决策：用户选择第一，回退链服从）
+# ═════════════════════════════════════════════════════════════════
+#
+# 决策规则（铁律）：
+#   ① 用户选择的模型版本（--ocr_version）永远是第一位尝试目标；
+#   ② 回退链（fallback_chain / fallback_1~3）仅决定「剩余候选」的顺序；
+#   ③ V6 不支持的语言（韩/俄）→ **直接删除 V6**（无论用户是否显式选 V6）。
+#      理由：V6 无该语言模型。paddle 后端会抛 ValueError（R4 已 catch → 回退），
+#      但 onnx 后端会**静默加载中文 rec 模型**→输出 "?" 垃圾（不抛错，回退链失效）。
+#      故统一在版本列表里删除 V6，不让它进入尝试矩阵。
+#
+# 示例：
+#   用户选V6；回退链 v5,v4 → 实际 [V6, V5, V4]        ← 无冲突
+#   用户选V6；回退链 v5,v4,v6 → 实际 [V6, V5, V4]    ← 去重
+#   用户选V5；回退链 v6,v5,v4 → 实际 [V5, V6, V4]    ← 用户优先
+#   用户选V5；回退链 v4,v6     → 实际 [V5, V4, V6]    ← 回退链补充
+#   用户选V6 + 韩文           → 实际 [V5, V4]        ← V6删除(防乱码/卡死)
+#
+
+# ── 第1步：确定用户显式选择的版本（永远第0位）────────────
+_ocr_version_arg = getattr(args, "ocr_version", None) or ""
+_user_ver = _ocr_version_arg.strip() or "PP-OCRv6"   # 用户选择，默认 V6
+
+# ── 第2步：取回退链（GUI 的 fallback_1/2/3 拼成）───
+_DEFAULT_CHAIN = ["PP-OCRv6", "PP-OCRv5", "PP-OCRv4"]
+_fc = getattr(args, "fallback_chain", None) or ""
+if _fc.strip():
+    _chain = [v.strip() for v in _fc.split(",") if v.strip()]
+else:
+    _chain = list(_DEFAULT_CHAIN)
+
+# ── 第3步：合并——用户选择放首位，回退链去重追加在后 ───
+VERSION_PRIORITY = [_user_ver]
+for _v in _chain:
+    if _v not in VERSION_PRIORITY:
+        VERSION_PRIORITY.append(_v)
+
+sys.stderr.write(
+    f"[engine] 版本决策：用户选={_user_ver} | 回退链={_chain} "
+    f"→ 实际尝试顺序={VERSION_PRIORITY}\n"
+)
+
+# ── 第4步：V6 不支持语言的安全调整（韩/俄）──────────────
+# V6 无 Korean/Russian 模型。不同后端行为：
+#   - paddle: V6+韩/俄 → ValueError 立即抛（R4 已 catch → 回退 V5）✅
+#   - onnx  : V6+韩/俄 → **静默加载中文 rec 模型** → 输出 "?" 垃圾
+#             （不抛错，回退链失效，R4 catch 抓不到）❌
+# 因此对不支持的语言，**无论用户是否显式选 V6、无论后端**，
+# 都从优先列表中**删除** V6，直接走 V5/V4。
+# 用户显式选 V6 也无效——V6 无该语言模型，强行加载只会乱码（ONNX）或抛错（paddle）。
+# 下方 _init_ocr_with_timeout 的 catch 仍保留作 paddle 后端的安全网。
+_V6_UNSUPPORTED_LANGS = {"korean", "ru"}
+if lang in _V6_UNSUPPORTED_LANGS and "PP-OCRv6" in VERSION_PRIORITY:
+    _before = list(VERSION_PRIORITY)
+    VERSION_PRIORITY = [v for v in VERSION_PRIORITY if v != "PP-OCRv6"]
+    _why = "用户显式选了 V6" if _user_ver == "PP-OCRv6" else "V6 来自回退链"
+    sys.stderr.write(
+        f"[engine][WARN] 语言 {lang} 在 PP-OCRv6 无模型（{_why}）。"
+        f"已从版本优先列表删除 V6：{_before} → {VERSION_PRIORITY}\n"
+    )
+
+
+def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
+    """在独立线程中初始化 PaddleOCR，带超时保护。
+
+    背景：PaddleOCR 构造函数在某些「版本×语言」组合下会**永久阻塞**
+    （如 PP-OCRv6 + korean/ru：V6 无该语言模型，PaddleX 内部卡死
+    在模型下载/加载等待中，不返回、不抛异常）。
+    若不设超时，except 永远抓不到 → for 循环卡死 → 回退链失效 →
+    用户看到「不报错也不出字、一直卡着」。
+
+    返回：(ocr实例, None) 成功 或 (None, 异常) 失败（含超时TimeoutError）。
+    """
+    import concurrent.futures
+
+    def _do_init():
+        return PaddleOCR(
+            device="cpu",
+            lang=lang,
+            ocr_version=ver,
+            use_textline_orientation=use_cls,
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            enable_mkldnn=mk,
+            cpu_threads=cpu_threads,
+            text_det_limit_side_len=limit_side_len,
+            text_det_limit_type="max",
+            **({"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
+               if IS_ONNX else {}),
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+        future = executor.submit(_do_init)
+        try:
+            ocr = future.result(timeout=timeout_sec)
+            return ocr, None
+        except concurrent.futures.TimeoutError:
+            future.cancel()  # 放弃该线程（进程退出时自动回收）
+            return None, TimeoutError(
+                f"PaddleOCR({ver}, lang={lang}) 初始化超时 "
+                f"({timeout_sec}s)，可能该版本不支持此语言，已跳过"
+            )
+        except Exception as e:
+            # ⚠️ R4 根因修复（2026-07-20）：
+            # 旧代码只 catch TimeoutError，不 catch 其他异常。
+            # 实测 V6+韩文/俄文会**立即抛 ValueError**（"No models are available
+            # for lang='korean' and ocr_version='PP-OCRv6'"，约 2s），而非铁律 #2
+            # 所述「永久阻塞」。该 ValueError 穿透 build_ocr -> main -> engine.py
+            # 整体崩溃（exit 1）-> 不打印 "OCR init completed." -> 回退链失效。
+            # catch 后返回 (None, e)，让 build_ocr continue 跳下一版本（V5）。
+            return None, e
 
 
 def build_ocr():
-    """按 VERSION_PRIORITY 依次尝试加载，首个成功即用。"""
+    """按 VERSION_PRIORITY 依次尝试加载（每个尝试有超时保护），首个成功即用。
+
+    超时保护：每个版本/后端组合的 PaddleOCR 构造函数最多等待 90 秒。
+    超时自动判定为失败，继续尝试下一个版本——解决 V6+韩文/俄文
+    「永久阻塞导致回退链失效」的问题。
+    """
+    # ⚠️ ENGINE_CONFIG 必须声明为 global：本函数内对它的重新赋值
+    #   （ONNX 后端按可用性收敛为 CUDA 或 CPU）若不声明 global，会变成「局部变量」，
+    #   模块级 ENGINE_CONFIG（import 时按 onnxruntime-gpu 默认设成了 CUDA+CPU）
+    #   永远不会被更新 → _resolve_engine_label 读到陈旧 CUDA 值 →
+    #   实际已回退 CPU，却仍标 gpu(cuda)（掩耳盗铃 bug，2026-07-19 修复）。
+    global ENGINE_CONFIG
     # 报告 ONNX 后端实际可用的 provider，并按可用性**最终决定**用哪个 provider：
     #   - onnxruntime-gpu 且 CUDAExecutionProvider 可用 → 优先 CUDA，CPU 兜底；
     #   - onnxruntime-gpu 但 CUDA 不可用（没装 onnxruntime-gpu / 驱动不匹配 / 缺 DLL）
@@ -269,14 +407,16 @@ def build_ocr():
             av = ort.get_available_providers()
             sys.stderr.write(f"[engine] ORT 可用 providers: {av}\n")
             if ENGINE == "onnxruntime-gpu":
-                if "CUDAExecutionProvider" in av:
+                # 双保险：provider 列表「且」驱动层真有 GPU 设备，才启用 CUDA。
+                # 单看 get_available_providers 会被残 CUDA 骗（间歇性列出 CUDA 却跑不起来）。
+                if "CUDAExecutionProvider" in av and _cuda_gpu_present():
                     ENGINE_CONFIG = {"providers": ["CUDAExecutionProvider", "CPUExecutionProvider"]}
                     sys.stderr.write("[engine] ✅ CUDAExecutionProvider 可用，启用 GPU 推理。\n")
                 else:
                     ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
                     sys.stderr.write(
-                        "[engine][WARN] 本机未检测到 CUDAExecutionProvider"
-                        "（onnxruntime-gpu 未安装，或 CUDA DLL/驱动不可用）。\n"
+                        "[engine][WARN] 本机未检测到可用 CUDA GPU"
+                        "（onnxruntime-gpu 未安装，或 CUDA DLL/驱动不可用，或 cuDeviceGetCount==0）。\n"
                         "         已自动回退 CPUExecutionProvider：功能正常，但无 GPU 提速。\n"
                         "         若需 GPU：在该插件 .venv 安装 onnxruntime-gpu[cuda,cudnn]==1.26.0"
                         "（无需系统级 CUDA Toolkit）。\n"
@@ -294,37 +434,46 @@ def build_ocr():
         f"[engine] 后端标签：{ENGINE_LABEL} / onnxruntime={ORT_VERSION}"
         f"{('/CUDA ' + CUDA_VER) if CUDA_VER else ''}\n"
     )
-    last_err = None
+    # ── 构造「版本 × mkldnn」尝试矩阵 ──
+    # ONNX 后端：mkldnn 无意义，仅按版本尝试。
+    # Paddle 后端：若用户开了 mkldnn，先试「开」；失败则**自动回退「关」**
+    #   （mkldnn 不可用 / oneDNN 崩溃 / 缺 DLL 等），不再硬崩。
+    #   这正是「CPU 模块之间不 fallback」的修复点：paddle+mkldnn 失败
+    #   → 自动改用 paddle 无 mkldnn，功能照常。
+    attempts = []
     for ver in VERSION_PRIORITY:
-        try:
-            ocr = PaddleOCR(
-                device="cpu",
-                lang=lang,
-                ocr_version=ver,
-                use_textline_orientation=use_cls,
-                # 方向纠正 / 去扭曲 交还本引擎自管（preprocess_doc）：
-                # 这两个开关 paddleocr 3.x 内部开启时会做几何变换，
-                # 但**不再把检测框逆映射回原图**，导致框偏移、不对齐。
-                # 故此处恒为 False，由 preprocess_doc() 完成变换并精确逆映射坐标。
-                use_doc_orientation_classify=False,
-                use_doc_unwarping=False,
-                enable_mkldnn=enable_mkldnn,
-                cpu_threads=cpu_threads,
-                text_det_limit_side_len=limit_side_len,
-                text_det_limit_type="max",  # 只缩小不放大：细图按原生尺寸跑，避免被放大 40+ 倍导致极慢
-                **({"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
-                   if IS_ONNX else {}),
-            )
-            sys.stderr.write(
-                f"[engine] 已加载：{ver} / lang={lang} / cls={use_cls} "
-                f"/ limit={limit_side_len}\n"
-            )
-            return ocr, ver
-        except Exception as e:
-            last_err = e
+        if IS_ONNX:
+            attempts.append((ver, False))
+        else:
+            if enable_mkldnn:
+                attempts.append((ver, True))
+                attempts.append((ver, False))   # mkldnn 回退档
+            else:
+                attempts.append((ver, False))
+    last_err = None
+    for ver, mk in attempts:
+        ocr, err = _init_ocr_with_timeout(ver, mk, timeout_sec=90)
+        if err:
+            last_err = err
+            sys.stderr.write(f"[engine][WARN] {ver} mkldnn={mk} 初始化失败：{err}\n")
             continue
+        # 初始化成功
+        global LOADED_VER, USED_MKLDNN
+        LOADED_VER = ver
+        USED_MKLDNN = mk
+        sys.stderr.write(
+            f"[engine] 已加载：{ver} / lang={lang} / cls={use_cls} "
+            f"/ mkldnn={mk} / limit={limit_side_len}\n"
+        )
+        if (not IS_ONNX) and enable_mkldnn and (mk is False):
+            sys.stderr.write(
+                "[engine][WARN] 请求的 mkldnn 初始化失败，"
+                "已自动回退 paddle 无 mkldnn（CPU）。功能正常。\n"
+            )
+        return ocr, ver
+    tried = "、".join(f"{v}(mkldnn={m})" for v, m in attempts)
     raise RuntimeError(
-        f"无法初始化 PaddleOCR（已尝试 {VERSION_PRIORITY}，lang={lang}）：{last_err}"
+        f"无法初始化 PaddleOCR（已尝试 {tried}，lang={lang}）：{last_err}"
     )
 
 
@@ -531,20 +680,51 @@ def preprocess_doc(img_bgr, do_ori, do_unwarp, pad=PAD):
     return pre_img, inv_fn
 
 
+def _is_fallback():
+    """是否发生了「回退」（实际加载的 ≠ 用户选择的）。
+
+    判定基准：_user_ver（用户通过 GUI --ocr_version 显式选择的版本）。
+    只有实际加载的版本与用户选择不同时才算回退（加 | fb）。
+
+    示例：
+      用户选 V6 → 加载 V6 = 不回退 → 无 | fb
+      用户选 V6 → V6 不可用、加载 V5 = 回退 → | fb
+      用户选 V5 → 加载 V5 = 不回退 → 无 | fb
+    """
+    if LOADED_VER and LOADED_VER != _user_ver:
+        return True          # 版本 ≠ 用户选择
+    if ENGINE == "onnxruntime-gpu" and DEVICE == "cpu":
+        return True          # 请求 GPU 却跑 CPU
+    if (not IS_ONNX) and enable_mkldnn and USED_MKLDNN is False:
+        return True          # 请求 mkldnn 却关了
+    return False
+
+
 def _backend_tag():
-    """生成简洁后端标签供 UI 显示，如 'gpu v6' / 'cpu(paddle) v6'。"""
-    dev = DEVICE                    # "gpu" / "cpu"
-    eng = ENGINE                    # "paddle" / "onnxruntime" / "onnxruntime-gpu"
-    if eng == "onnxruntime-gpu":
-        eng_short = "cuda"
-    elif eng == "onnxruntime":
-        eng_short = "onnx"
+    """实际使用的推理模块（不是用户「请求」的，而是 build_ocr 收敛后真正跑的）。
+
+    正常情况直接写实际模块，如 cpu(onnx) v6 / gpu(cuda) v6；
+    仅当发生回退时，右侧追加「 | fb」短标记（绝不写「GPU回退」之类大字）。
+    """
+    ver = LOADED_VER or getattr(args, "ocr_version", None) or "PP-OCRv6"
+    ver_short = ver.replace("PP-OCRv", "") if "PP-OCRv" in ver else "6"
+    if DEVICE == "gpu":
+        tag = "gpu(cuda)"                 # 真·GPU（CUDA 实际可用）
+    elif IS_ONNX:
+        tag = "cpu(onnx)"                # onnxruntime / onnxruntime-gpu 落到 onnx-CPU
     else:
-        eng_short = "paddle"
-    # args.ocr_version 真实启动由 PPOCR_umi 下发；此处做 None 防御
-    ov = getattr(args, "ocr_version", None) or "PP-OCRv6"
-    ver_short = ov.replace("PP-OCRv", "") if "PP-OCRv" in ov else "6"
-    return f"{dev}({eng_short}) v{ver_short}"
+        mk = USED_MKLDNN if USED_MKLDNN is not None else enable_mkldnn
+        tag = "cpu(paddle+mkldnn)" if mk else "cpu(paddle)"
+    tag += f" v{ver_short}"
+    fb = _is_fallback()
+    if fb:
+        tag += " | fb"
+    # 诊断日志（stderr → 引擎可见；帮助定位标签异常）
+    sys.stderr.write(
+        f"[tag] {tag}  (LOADED_VER={LOADED_VER}, USER_CHOICE={_user_ver}, "
+        f"DEVICE={DEVICE}, IS_ONNX={IS_ONNX}, fallback={fb})\n"
+    )
+    return tag
 
 
 def get_rss_mb():
@@ -588,7 +768,7 @@ def main():
         import datetime
         _log = os.path.join(os.path.dirname(os.path.abspath(__file__)), "engine_active.log")
         with open(_log, "a", encoding="utf-8") as f:
-            _fb = " [⚠回退CPU]" if (ENGINE == "onnxruntime-gpu" and DEVICE == "cpu") else ""
+            _fb = " | fb" if _is_fallback() else ""
             f.write(f"{datetime.datetime.now():%Y-%m-%d %H:%M:%S}  "
                     f"init_ok ver={ver} lang={lang} cls={use_cls} "
                     f"engine={ENGINE} backend={ENGINE_LABEL} device={DEVICE} "
@@ -635,7 +815,21 @@ def main():
                 inv_fn = None
                 if _do_pre:
                     try:
-                        run_img, inv_fn = preprocess_doc(img, use_doc_orientation, use_doc_unwarping)
+                        # ⚠️ preprocess_doc 期望 BGR numpy 数组，但 img 是文件路径字符串。
+                        # 旧代码直接传路径 -> 'str' object has no attribute 'shape' ->
+                        # except 吞掉 -> 回退 run_img=img（无 padding 原图）。
+                        # 后果：GUI 默认 use_doc_*=True 时，连基础白边（_pad_image）都被
+                        # 跳过 -> V6/V5 边缘丢字。修复：先 cv2.imread 转成 ndarray。
+                        if isinstance(img, str):
+                            # cv2.imread 在 Windows 不支持非 ASCII 路径（如中文文件名
+                            # 样章-韩语段落.png），实测返回 None。用 np.fromfile + imdecode 绕过。
+                            _img_arr = cv2.imdecode(
+                                np.fromfile(img, dtype=np.uint8), cv2.IMREAD_COLOR)
+                        else:
+                            _img_arr = img
+                        if _img_arr is None:
+                            raise RuntimeError(f"图像读取失败：{img}")
+                        run_img, inv_fn = preprocess_doc(_img_arr, use_doc_orientation, use_doc_unwarping)
                     except Exception as e:
                         sys.stderr.write(
                             f"[preproc][WARN] 预处理异常，回退无预处理 OCR：{e}\n"

@@ -119,21 +119,24 @@ globalOptions = {
             "无需系统装 CUDA Toolkit；不可用时自动回退 CPU）。"
         ),
     },
+    # ── 选择模型版本：扁平项，紧挨推理引擎下方、版本回退链 ① 之前（R2-b，不打 group）──
     "ocr_version": {
-        "title": tr("模型版本"),
+        "title": tr("选择模型版本（最优先）"),
         "optionsList": [
             ["PP-OCRv6", "v6 medium（高精度·默认）"],
-            ["PP-OCRv4", "v4 mobile（快速）"],
             ["PP-OCRv5", "v5（多语言·韩/俄）"],
+            ["PP-OCRv4", "v4 mobile（快速）"],
         ],
         "default": "PP-OCRv6",
         "toolTip": tr(
-            "v6 medium：识别精度最高，默认使用该版本。\n"
-            "v4 mobile：速度快约 2.7 倍，适合日常截图/文档。\n"
-            "v5：支持韩语/俄语等 PP-OCRv6 未覆盖的语言。"
+            "用户选择的模型版本将作为**第一优先**尝试目标。\n"
+            "若所选版本初始化失败，自动按下方「版本回退链」依次尝试其他版本。\n"
+            "v6 medium：识别精度最高，简/繁/英/日文首选。\n"
+            "v5：支持韩语/俄语等 PP-OCRv6 未覆盖的语言。\n"
+            "v4 mobile：速度快约 2.7 倍，适合日常截图。"
         ),
     },
-    # ── 版本回退链（三个框，按顺序尝试；GPU/ONNX 不可用时依次回退）──
+    # ── 版本回退链（用户选择版本失败后按此顺序尝试）──
     "fallback_1": {
         "title": tr("版本回退链 ①"),
         "default": "PP-OCRv6",
@@ -166,6 +169,7 @@ globalOptions = {
         "min": 1,
         "isInt": True,
     },
+    # 内存占用 / 闲时清理：保持靠后（在线程数之后、文档预处理之前）
     "ram_max": {
         "title": tr("内存占用限制"),
         "default": _ramMax,
