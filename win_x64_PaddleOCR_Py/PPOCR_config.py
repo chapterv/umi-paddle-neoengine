@@ -188,23 +188,26 @@ globalOptions = {
         "type": "group",
         "use_doc_orientation": {
             "title": tr("文档方向纠正"),
-            "default": True,
+            "default": False,
             "toolTip": tr(
-                "整图方向分类（0°/90°/180°/270°），纠正横屏/倒置的文档图片。默认开。"
+                "整图方向分类（0°/90°/180°/270°），纠正横屏/倒置的文档图片。"
+                "默认关（与原版 PaddleOCR-json 对齐；开启后坐标可能偏移）。"
             ),
         },
         "use_doc_unwarping": {
             "title": tr("文档去扭曲(矫正)"),
-            "default": True,
+            "default": False,
             "toolTip": tr(
-                "曲面文档展平（UVDoc），纠正弯曲/拍照畸变的书页。默认开。"
+                "曲面文档展平（UVDoc），纠正弯曲/拍照畸变的书页。"
+                "默认关（与原版 PaddleOCR-json 对齐；开启后坐标系统性偏移 20~50px）。"
             ),
         },
         "use_textline_orientation": {
             "title": tr("纠正文本方向"),
-            "default": True,
+            "default": False,
             "toolTip": tr(
-                "逐行方向分类（0°/180°），纠正倒置的文本行（如竖排/反向扫描的中日韩文）。默认开。"
+                "逐行方向分类（0°/180°），纠正倒置的文本行（如竖排/反向扫描的中日韩文）。"
+                "默认关（与原版 PaddleOCR-json 对齐）。"
             ),
         },
     },
