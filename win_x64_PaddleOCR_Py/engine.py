@@ -224,11 +224,15 @@ def _resolve_engine_label():
     except Exception:
         return "cpu(onnx?)", "cpu", None, None
 
-# ── 文档预处理开关（默认开，对齐 PaddleOCR 3.x 默认；None=开）──────
+# ── 文档预处理开关（默认关，对齐原版 PaddleOCR-json 行为；GUI 可开）──────
+# 原版引擎（PaddleOCR-json）不支持 use_doc_unwarping / use_doc_orientation，
+# 若默认开启会导致坐标偏移（UVDoc 内部几何矫正的逆变换不精确，系统性偏移 20~56px，
+# 且与 padding 白边补丁冲突产生更大错位）。故默认关闭，与原版对齐；
+# 用户有曲面矫正需求时通过 GUI 手动开启。
 _use_doc_ori = getattr(args, "use_doc_orientation", None)
-use_doc_orientation = True if _use_doc_ori is None else to_bool(_use_doc_ori)
+use_doc_orientation = False if _use_doc_ori is None else to_bool(_use_doc_ori)
 _use_doc_unwarp = getattr(args, "use_doc_unwarping", None)
-use_doc_unwarping = True if _use_doc_unwarp is None else to_bool(_use_doc_unwarp)
+use_doc_unwarping = False if _use_doc_unwarp is None else to_bool(_use_doc_unwarp)
 
 # ocr_version：优先加载的版本（默认 v6 medium 精度最高；v5 回退用于韩/俄等 v6 未覆盖语言；v4 兜底最快）
 _ocr_version_arg = getattr(args, "ocr_version", None)
@@ -352,8 +356,11 @@ def _unpad_box(box, pad=PAD):
     return [[int(round(x - pad)), int(round(y - pad))] for x, y in box]
 
 
-def convert(result):
-    """paddleocr 3.x list[dict] → Umi-OCR {code,data:[{box,score,text}],backend}."""
+def convert(result, was_padded=True):
+    """paddleocr 3.x list[dict] → Umi-OCR {code,data:[{box,score,text}],backend}.
+
+    was_padded: 输入图像是否经过 _pad_image 处理（UVDoc 模式为 False，跳过 unpad）。
+    """
     if not result or len(result) == 0:
         return {"code": 100, "data": [], "backend": _backend_tag()}
     item = result[0]
@@ -362,7 +369,10 @@ def convert(result):
     scores = item.get("rec_scores") or []
     data = []
     for poly, text, score in zip(polys, texts, scores):
-        box = _unpad_box(poly)                       # ← 还原坐标
+        if was_padded:
+            box = _unpad_box(poly)                       # ← 还原坐标
+        else:
+            box = [[int(round(x)), int(round(y))] for x, y in poly]
         data.append({"box": box, "score": float(score), "text": str(text)})
     return {"code": 100, "data": data, "backend": _backend_tag()}
 
@@ -460,7 +470,15 @@ def main():
                     tmp_base64 = img
 
                 # 边缘补丁：给图像加白边，避免 PP-OCRv6 对近边缘文字丢首字
-                tmp_padded = _pad_image(img)
+                # ⚠️ 当 use_doc_unwarping=True（UVDoc）时必须跳过补丁：
+                #   UVDoc 内部做几何矫正（单应性变换），检测在矫正后图上跑，
+                #   再逆变换映射回输入坐标系。padding 会破坏这个映射关系，
+                #   导致坐标偏移 20~56px 甚至出现负坐标。
+                _need_pad = not use_doc_unwarping
+                if _need_pad:
+                    tmp_padded = _pad_image(img)
+                else:
+                    tmp_padded = img  # UVDoc 模式直接用原图
 
                 try:
                     # ── 关键修复：推理期间重定向 stdout → stderr ──
@@ -472,10 +490,10 @@ def main():
                     finally:
                         os.dup2(saved_fd, 1)
                         os.close(saved_fd)
-                    out = convert(result)
+                    out = convert(result, was_padded=_need_pad)
                 finally:
-                    # 清理补丁临时文件（base64 的由外层 finally 清理）
-                    if tmp_padded and os.path.exists(tmp_padded):
+                    # 清理补丁临时文件（仅 padding 产生的临时文件；UVDoc 模式 tmp_padded=原图，不删）
+                    if _need_pad and tmp_padded and tmp_padded != img and os.path.exists(tmp_padded):
                         try:
                             os.remove(tmp_padded)
                         except Exception:
