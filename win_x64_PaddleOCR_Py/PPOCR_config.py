@@ -111,7 +111,9 @@ globalOptions = {
             ["onnxruntime", "ONNX Runtime CPU"],
             ["onnxruntime-gpu", "ONNX Runtime CUDA GPU"],
         ],
-        "default": "paddle",
+        # 默认 ONNX CPU：部署路径含中文时 paddle 原生易踩 C++ 路径坑；
+        # 懒人包/纯净包均按「开箱优先能跑」选择 onnxruntime。
+        "default": "onnxruntime",
         "toolTip": tr(
             "Paddle (MKLDNN)：Paddle 原生 oneDNN CPU 后端，3.2.1 下稳定，默认。\n"
             "ONNX Runtime CPU：绕过 oneDNN，可作对照 / 兜底。\n"

@@ -76,10 +76,51 @@ from PIL import Image
 # 这样：① 首次识别自动下载模型到此目录（无需联网后手动搬运）；
 #      ② 懒人版直接预置模型到此目录，解压即用。
 # （GPU 插件可通过目录 junction 共享 CPU 插件的 paddlex/，避免模型存两份。）
+#
+# ⚠️ Windows + 非 ASCII 路径（如「发布包」）：
+#   Paddle 原生推理 C++ 层 IsFileExists 对 Unicode 路径常失败，报
+#   Cannot open file ...\inference.json（文件其实在、Python 也能 open）。
+#   ONNXRuntime 一般没事；engine=paddle 会必崩。
+#   修复：PADDLE_PDX_CACHE_HOME 尽量改成 8.3 短路径（纯 ASCII），指向同一目录。
+def _win_short_path(path: str) -> str:
+    if os.name != "nt" or not path:
+        return path
+    try:
+        path.encode("ascii")
+        return path
+    except UnicodeEncodeError:
+        pass
+    try:
+        import ctypes
+        GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
+        # 路径必须已存在，短名才解析得出来
+        if not os.path.exists(path):
+            return path
+        buf = ctypes.create_unicode_buffer(4096)
+        n = GetShortPathNameW(path, buf, 4096)
+        if n and buf.value:
+            try:
+                buf.value.encode("ascii")
+                return buf.value
+            except UnicodeEncodeError:
+                return buf.value
+    except Exception:
+        pass
+    return path
+
+
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _PADDLEX_HOME = os.path.join(_HERE, "paddlex")
 os.makedirs(_PADDLEX_HOME, exist_ok=True)
+_PADDLEX_HOME = _win_short_path(os.path.abspath(_PADDLEX_HOME))
 os.environ["PADDLE_PDX_CACHE_HOME"] = _PADDLEX_HOME
+if _PADDLEX_HOME != os.path.join(_HERE, "paddlex"):
+    try:
+        sys.stderr.write(
+            f"[engine] PADDLE_PDX_CACHE_HOME 使用 ASCII 短路径（规避中文路径）：{_PADDLEX_HOME}\n"
+        )
+    except Exception:
+        pass
 
 from paddleocr import PaddleOCR
 
@@ -404,6 +445,19 @@ def build_ocr():
     if IS_ONNX:
         try:
             import onnxruntime as ort
+        except ImportError as e:
+            # 部署包常见根因：只装了 paddleocr，推理后端 pip 中断/失败，
+            # 或仅装了残缺 venv。GUI 默认 engine=onnxruntime 时会连跪 V6/V5/V4。
+            raise RuntimeError(
+                "engine=%s 但当前 Python 环境未安装 onnxruntime（import 失败：%s）。\n"
+                "请在插件目录重新运行项目根 setup.bat，并完成「推理后端」安装：\n"
+                "  · 纯 CPU：选项 [2] → 安装 onnxruntime 到 .venv\n"
+                "  · GPU：选项 [1]/[3] → 安装 onnxruntime-gpu 到 .venv_gpu\n"
+                "安装完成后可用:  .venv\\Scripts\\python -c \"import onnxruntime; print(onnxruntime.__version__)\"\n"
+                "或:              .venv_gpu\\Scripts\\python -c \"import onnxruntime; print(onnxruntime.__version__)\""
+                % (ENGINE, e)
+            ) from e
+        try:
             av = ort.get_available_providers()
             sys.stderr.write(f"[engine] ORT 可用 providers: {av}\n")
             if ENGINE == "onnxruntime-gpu":
@@ -424,6 +478,8 @@ def build_ocr():
             else:
                 ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}
                 sys.stderr.write("[engine] 纯 CPU ONNX 推理。\n")
+        except RuntimeError:
+            raise
         except Exception as e:
             sys.stderr.write(f"[engine][WARN] 检查 providers 失败，回退 CPU：{e}\n")
             ENGINE_CONFIG = {"providers": ["CPUExecutionProvider"]}

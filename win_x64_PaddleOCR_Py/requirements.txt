@@ -17,7 +17,11 @@ paddleocr==3.7.0
 # 默认锁 CUDA 12.x：兼容本机 RTX 3070 Ti + 驱动 576.57（最高到 CUDA 12.9）。
 onnxruntime-gpu[cuda,cudnn]==1.26.0
 # ── 备选（按需替换上面一行）──
-# 驱动支持 CUDA 13（R580+）的环境，可改用 1.27.0（CUDA 13 + cuDNN 9）：
-#   onnxruntime-gpu[cuda,cudnn]==1.27.0
+# 驱动支持 CUDA 13（R580+）时理论可改 1.27.0，但截至 2026-07 实测：
+#   onnxruntime-gpu[cuda,cudnn]==1.27.0 依赖 nvidia-*-cu13~=13.0，
+#   PyPI 上 cu13 包只有占位 0.0.1，**无正式 13.x wheel** → pip 必失败。
+#   这与 Python 3.11/3.12 无关。可行方案：
+#   A) 继续用上面的 1.26.0[cuda,cudnn]（cu12 DLL 可从 PyPI 装齐）——推荐
+#   B) 只装本体：onnxruntime-gpu==1.27.0，CUDA EP 依赖本机自备 CUDA13 运行库
 # 纯 CPU、确定不用 CUDA 的环境，可换更轻量的 CPU 专用包（不含 CUDA DLL）：
-#   onnxruntime==1.27.0
+#   onnxruntime==1.26.0
