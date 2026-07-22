@@ -9,8 +9,11 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
+- **当前源码版本**：**1.1**（见仓库根目录 `VERSION`）  
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
-- **完整发布包**（含 Umi 主程序 + `setup.bat`）：见本机同级目录 **`Local-Ocr_发布包/`**（zip **不进**本 git 仓库）
+- **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
+  - `umi-paddle-neoengine-deploy.zip` — 纯净部署（需 `setup.bat`）  
+  - `umi-paddle-neoengine-ONNX-V6-CPU.zip` — ONNX V6 CPU 懒人包
 
 ---
 
@@ -191,9 +194,9 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ### 方式 A：完整发布包（推荐最终用户）
 
-1. 从 `Local-Ocr_发布包/` 取 zip：  
-   - **`Local-Ocr_纯净部署版.zip`**：小包，需联网 `setup.bat`  
-   - **`Local-Ocr_ONNX_V6_CPU版.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU  
+1. 从 `umi-paddle-neoengine-release/` 取 zip：  
+   - **`umi-paddle-neoengine-deploy.zip`**：小包，需联网 `setup.bat`  
+   - **`umi-paddle-neoengine-ONNX-V6-CPU.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU  
 2. 解压到**尽量纯英文路径**（如 `C:\Local-Ocr\`；中文路径下 paddle 原生更易出问题，ONNX 相对稳）  
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  
@@ -251,7 +254,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 | 版本 / 阶段 | 说明 |
 |-------------|------|
-| **ONNX CPU 默认里程碑** | 默认引擎改为 `onnxruntime`；发布纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort 安装 |
+| **1.1** | 批量文档：空白页 `median([])` 防护；Mission 工人 `forceRecover` + OCR 等待超时；stop 杀引擎可再启；发布包更名为 `deploy` / `ONNX-V6-CPU`；宿主补丁见 `patches/umi-host/` |
+| **1.0 / ONNX CPU 默认** | 默认引擎 `onnxruntime`；纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort |
 | **GPU 路线** | `onnxruntime-gpu` + CUDA EP；DLL PATH 修复；缺 CUDA 自动回退 |
 | **MKLDNN 稳定** | 锁定 `paddlepaddle==3.2.1`，修复 3.3.x PIR/oneDNN 崩溃与 904 协议污染 |
 | **多语言与回退** | 韩/俄等无 v6 rec 时回退 v5；语言码映射（如 ru） |
