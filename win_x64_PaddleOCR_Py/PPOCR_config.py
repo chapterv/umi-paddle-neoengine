@@ -107,18 +107,18 @@ globalOptions = {
     "engine": {
         "title": tr("推理引擎"),
         "optionsList": [
-            ["paddle", "Paddle (MKLDNN) CPU（默认）"],
-            ["onnxruntime", "ONNX Runtime CPU"],
+            ["onnxruntime", "ONNX Runtime CPU（默认·推荐）"],
             ["onnxruntime-gpu", "ONNX Runtime CUDA GPU"],
+            ["paddle", "Paddle (MKLDNN) CPU"],
         ],
-        # 默认 ONNX CPU：部署路径含中文时 paddle 原生易踩 C++ 路径坑；
+        # 默认 ONNX CPU：开箱稳；GPU 用户在 GUI 切到 onnxruntime-gpu。
         # 懒人包/纯净包均按「开箱优先能跑」选择 onnxruntime。
         "default": "onnxruntime",
         "toolTip": tr(
-            "Paddle (MKLDNN)：Paddle 原生 oneDNN CPU 后端，3.2.1 下稳定，默认。\n"
-            "ONNX Runtime CPU：绕过 oneDNN，可作对照 / 兜底。\n"
-            "ONNX Runtime CUDA GPU：优先用 CUDA 提速（依赖随包装进 venv，"
-            "无需系统装 CUDA Toolkit；不可用时自动回退 CPU）。"
+            "ONNX Runtime CPU（默认）：绕过 oneDNN，部署路径含中文时更稳。\n"
+            "ONNX Runtime CUDA GPU：优先 CUDA 提速（onnxruntime-gpu[cuda,cudnn]==1.26，"
+            "DLL 进 venv，无需系统 CUDA Toolkit；不可用时自动回退 CPU）。\n"
+            "Paddle (MKLDNN)：Paddle 原生 oneDNN CPU（须 paddlepaddle==3.2.1）。"
         ),
     },
     # ── 选择模型版本：扁平项，紧挨推理引擎下方、版本回退链 ① 之前（R2-b，不打 group）──

@@ -8,21 +8,16 @@
 > 推理，复用 Umi-OCR 自带的 `PPOCR_umi` / `PPOCR_api` JSON 管道。
 > 旧引擎 `win7_x64_PaddleOCR-json` 保留作为回退，本插件是「新增可选引擎」。
 
-## 三种后端（同一文件夹 · 单一插件）
-本插件**只有 `win_x64_PaddleOCR_Py` 这一个文件夹、一个 `engine.py`**；**paddle(MKLDNN) / ONNX-CPU / ONNX-CUDA
+## 三种后端（同一文件夹 · 单一插件 · 含 GPU）
+本插件**只有 `win_x64_PaddleOCR_Py` 这一个文件夹、一个 `engine.py`**；**ONNX-CPU / ONNX-CUDA(GPU) / paddle(MKLDNN)
 是同一个 `engine.py` 的三种推理后端**，靠 `--engine` 参数（GUI「推理引擎」下拉框）切换。
-**不拆目录、不拆插件**，一份代码覆盖全部后端：
+**不拆目录、不拆插件**，一份代码覆盖 CPU + GPU：
 
-- **路线一 · 纯 MKLDNN（默认 · 本项目正解）**：`--engine paddle`（或默认/空）。Paddle 原生后端 + Intel oneDNN（MKLDNN）CPU 加速。
-  锁定 `paddlepaddle==3.2.1`（该版已修复 oneDNN 的 PIR 崩溃）；**MKLDNN 默认开启、稳定加速**。
-  → 这是「完整版 / 双 CPU 版」的默认引擎。
-- **路线二 · ONNX Runtime（CPU 旁路）**：`--engine onnxruntime`。完全绕开 oneDNN，用 ONNX Runtime 的 `CPUExecutionProvider` 推理。
-  用途：① `paddlepaddle==3.3.x`（最新）下 MKLDNN 会崩溃，此时只能切 ONNX 才能正常出结果；
-  ② 作为对照 / 兜底。两者纯 CPU、同图速度同量级（见下方实测表），选型看**兼容性**而非速度。
-- **路线三 · ONNX Runtime CUDA GPU**：`--engine onnxruntime-gpu`。优先 `CUDAExecutionProvider`，**不可用时自动回退 CPU**
-  （CUDA 缺失 / cuDNN 未装 / 某 op 不支持均安全降级，功能正常只是无 GPU 提速）。
-  由 `requirements.txt` 中的 `onnxruntime-gpu[cuda,cudnn]` 提供，CUDA 12.x DLL 随包装进 `.venv`，**无需系统装 CUDA Toolkit**；
-  驱动最高仅到 CUDA 12.9 的环境（如 RTX 3070 Ti + 驱动 576.57）用 1.26.0，支持 CUDA 13（R580+）的可换 1.27.0。
+- **默认 · ONNX Runtime CPU**：`--engine onnxruntime`。`CPUExecutionProvider`；开箱稳，中文路径更不易踩 Paddle 原生坑。
+- **GPU · ONNX Runtime CUDA**：`--engine onnxruntime-gpu`。优先 `CUDAExecutionProvider`，**不可用时自动回退 CPU**。
+  `requirements.txt` 钉 **`onnxruntime-gpu[cuda,cudnn]==1.26.0`**（CUDA 12.x DLL 进 venv，**无需系统 CUDA Toolkit**）。
+  `engine.py` 含 Windows NVIDIA DLL PATH / `add_dll_directory` 修复，避免假 GPU 回退。
+- **可选 · Paddle (MKLDNN) CPU**：`--engine paddle`。须 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 会崩）。
 
 ## 文件说明
 | 文件 | 作用 |
