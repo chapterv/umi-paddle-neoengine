@@ -1,25 +1,10 @@
-# runtime / env
+# 运行期生成，不入库
 .venv/
-.venv_*/
 paddlex/
 __pycache__/
-*.py[cod]
 *.log
-engine_stderr.log
 engine_active.log
 
-# IDE / OS
-.idea/
-.vscode/
-.DS_Store
-Thumbs.db
-
-# release packages (go to Local-Ocr_发布包 only)
 *.zip
 *.7z
 
-# local benches / noise
-_result_*.txt
-bench_*.png
-bench_*.md
-_test_*.py

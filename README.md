@@ -1,13 +1,16 @@
-# Local-Ocr-Plugin · Umi-OCR 本地 PP-OCRv6 引擎插件
+# umi-paddle-neoengine
+
+**Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![GitHub](https://img.shields.io/badge/github-chapterv%2Fumi--paddle--neoengine-black)](https://github.com/chapterv/umi-paddle-neoengine)
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-完整可运行发布包（含 Umi 主程序 + `setup.bat`）见同级目录 **`Local-Ocr_发布包/`**；本仓库以**插件源码**为主。
+- **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
+- **完整发布包**（含 Umi 主程序 + `setup.bat`）：见本机同级目录 **`Local-Ocr_发布包/`**（zip **不进**本 git 仓库）
 
 ---
 
@@ -261,15 +264,11 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ## 支持
 
-- **Issue / 讨论**：请在本仓库或主工程仓库提 issue，尽量附上：  
-  - Umi 与插件路径  
-  - 推理引擎选项、是否 GPU  
-  - `engine_stderr.log` 末尾数十行  
-  - 样张是否可公开  
+- **Issue / 讨论**：请在本仓库提 issue：<https://github.com/chapterv/umi-paddle-neoengine/issues>  
+  尽量附上：Umi 与插件路径、推理引擎选项、是否 GPU、`engine_stderr.log` 末尾、样张是否可公开  
 - **相关项目**  
   - Umi-OCR：<https://github.com/hiroi-sora/Umi-OCR>  
   - 云端 AI OCR 插件（精度对照参考）：<https://github.com/EatWorld/UmiOCR-AI-OCR-Plugin>  
-  - 同步镜像（ONNX CPU 里程碑）：<https://github.com/chapterv/umi-paddle-neoengine>  
 
 ---
 
@@ -281,4 +280,4 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ---
 
-**感谢使用 Local-Ocr-Plugin。** 本地升级到 PP-OCRv6，可选 GPU，继续离线、免费、可批量。
+**感谢使用 umi-paddle-neoengine。** 本地升级到 PP-OCRv6，可选 GPU，继续离线、免费、可批量。
