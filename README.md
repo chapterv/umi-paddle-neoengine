@@ -2,6 +2,7 @@
 
 **Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
+[![Version](https://img.shields.io/badge/version-1.1-orange)](./VERSION)
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
@@ -9,7 +10,7 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.1**（见仓库根目录 `VERSION`）  
+- **当前源码版本**：**1.1**（见仓库根目录 [`VERSION`](./VERSION)，Git 标签 `v1.1`）  
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
   - `umi-paddle-neoengine-deploy.zip` — 纯净部署（需 `setup.bat`）  
@@ -250,19 +251,34 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ---
 
-## 版本历史
+## 版本修订记录
+
+版本号写在仓库根目录 **`VERSION`**（当前 **`1.1`**），发布时打 Git 标签 **`v1.1`**。
+
+### v1.1（当前）
+
+| 项 | 说明 |
+|----|------|
+| **版本号** | `1.1` / 标签 `v1.1` |
+| **批量文档稳定性** | 空白页 / 脏空 text：`linePreprocessing` 防 `median([])` 崩溃 |
+| **任务工人恢复** | Mission `forceRecover` + worker epoch；`msnTask` 异常不再拖死整条队列 |
+| **停止可再启** | 批量文档 stop 时中断嵌套 OCR 并杀引擎；`BatchDOC.msnStop` 强制恢复工人槽 |
+| **单页超时** | 文档嵌套 OCR 等待最长约 180s，超时记本页错误并继续 |
+| **宿主补丁** | 完整包内嵌 Umi `py_src` 修复；源码对照见 [`patches/umi-host/`](./patches/umi-host/) |
+| **发布包命名** | `umi-paddle-neoengine-deploy.zip`、`umi-paddle-neoengine-ONNX-V6-CPU.zip` → 目录 `umi-paddle-neoengine-release/` |
+
+### 更早阶段
 
 | 版本 / 阶段 | 说明 |
 |-------------|------|
-| **1.1** | 批量文档：空白页 `median([])` 防护；Mission 工人 `forceRecover` + OCR 等待超时；stop 杀引擎可再启；发布包更名为 `deploy` / `ONNX-V6-CPU`；宿主补丁见 `patches/umi-host/` |
-| **1.0 / ONNX CPU 默认** | 默认引擎 `onnxruntime`；纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort |
+| **1.0** | 默认引擎 `onnxruntime`；纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort；里程碑标签 `1.0` |
 | **GPU 路线** | `onnxruntime-gpu` + CUDA EP；DLL PATH 修复；缺 CUDA 自动回退 |
 | **MKLDNN 稳定** | 锁定 `paddlepaddle==3.2.1`，修复 3.3.x PIR/oneDNN 崩溃与 904 协议污染 |
 | **多语言与回退** | 韩/俄等无 v6 rec 时回退 v5；语言码映射（如 ru） |
 | **路径加固** | Windows 非 ASCII 路径下 Paddle 缓存改 8.3 短路径 |
 | **部署** | `setup.bat` 两段式；修复 echo `>` 误生成垃圾文件；打包排除 bench 与误产物 |
 
-更细的提交说明见本仓库 `git log` 与主工程文档（`docs/`，若你使用 monorepo）。
+更细的提交说明见本仓库 `git log`。
 
 ---
 

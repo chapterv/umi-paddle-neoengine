@@ -1,44 +1,57 @@
-# Local-Ocr · Umi-OCR 新引擎（PP-OCRv6 / v4）发布包
+# Local-Ocr · Umi-OCR 新引擎（PP-OCRv6）发布包
+
+**当前版本：1.1**（与源码仓 `VERSION` / 标签 `v1.1` 对齐）
 
 把 Umi-OCR v2.1.5 内置的 PP-OCRv3 引擎，升级为官方最新 **PaddleOCR 3.x** 路线
-（默认 **PP-OCRv4 mobile**，可在设置里切 **PP-OCRv6 medium**，质量更高）。
+（推荐 **PP-OCRv6 medium** + **ONNX Runtime**，可在设置里切 v5/v4 与 Paddle/MKLDNN）。
 
-> 里程碑：`v1.0-speed-fixed` —— 速度根因已修复（细图不再被放大 40+ 倍）。
-> 当前锁定 **`paddlepaddle==3.2.1`**：该版本已修复 oneDNN 的 PIR 崩溃，**MKLDNN 默认开启、稳定加速**。
-> ⚠️ 切勿升级到 3.3.x —— 其 oneDNN（MKLDNN）在 Windows/CPU 下推理必崩
-> （`ConvertPirAttribute2RuntimeAttribute`）；3.3.x 下只能用下方的「路线二 ONNX」旁路。
+> **v1.1**：批量文档空白页崩溃与「停止后无法再启」已修；发布包更名为下方两个 zip。  
+> 锁定 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 在 Windows/CPU 下易崩，勿擅自升级）。  
+> 公开源码：<https://github.com/chapterv/umi-paddle-neoengine>
 
 ---
 
-## 两种推理引擎（同一套代码 · 两个发布包）
+## 版本修订记录
 
-插件只有 `Umi-OCR/UmiOCR-data/plugins/win_x64_PaddleOCR_Py/` **一个文件夹**，
-MKLDNN 与 ONNX 是同一个 `engine.py` 的**两种后端模式**，靠 GUI「推理引擎」下拉切换：
+### v1.1（当前）
+
+| 项 | 说明 |
+|----|------|
+| **批量文档** | 空白页 / 脏空 text 防 `median([])`；单页 OCR 超时后继续 |
+| **任务恢复** | Mission `forceRecover`；停止时杀 OCR 引擎，可再次提交任务 |
+| **发布包** | 仅保留两包（见下），输出目录 `umi-paddle-neoengine-release/` |
+
+### v1.0 及更早
+
+- 默认 **ONNX Runtime CPU**；可选 ONNX CUDA GPU、Paddle+MKLDNN  
+- 部署 `setup.bat`、中文路径、模型自包含 `paddlex/` 等  
+
+---
+
+## 三种推理后端（同一插件文件夹）
+
+插件只有 `Umi-OCR/UmiOCR-data/plugins/win_x64_PaddleOCR_Py/` **一个文件夹**；
+三种后端是同一个 `engine.py` 的模式，靠 GUI「推理引擎」切换：
 
 | 路线 | 引擎 | 说明 |
 |------|------|------|
-| **路线一 · 纯 MKLDNN（默认）** | `--engine paddle` | Paddle 原生后端 + Intel oneDNN（MKLDNN）CPU 加速。`paddlepaddle==3.2.1` 下稳定、最快。**这是正解 / 完整版。** |
-| **路线二 · ONNX Runtime（CPU 旁路）** | `--engine onnxruntime` | 完全绕开 oneDNN，用 ONNX Runtime 的 `CPUExecutionProvider` 推理。用于 3.3.x 下 MKLDNN 崩溃时的兜底 / 对照。两者纯 CPU、同图速度同量级。 |
-
-> **两个发布包共用这一套代码**，区别只在 GUI 里「推理引擎」的**默认值**不同：
-> - **MKLDNN 版（双 CPU）**：默认 paddle（MKLDNN），ONNX 仍可在下拉里切换。
-> - **ONNX 版（单独 ONNX）**：默认 onnxruntime，直接走 ONNX 旁路。
+| **默认 · ONNX CPU** | `--engine onnxruntime` | 开箱稳，中文路径更不易踩坑 |
+| **GPU · ONNX CUDA** | `--engine onnxruntime-gpu` | 优先 CUDA；不可用时回退 CPU |
+| **可选 · Paddle MKLDNN** | `--engine paddle` | 须 `paddlepaddle==3.2.1` |
 
 ---
 
-## 本次四个发布包
+## 当前发布包（v1.1）
 
-每个引擎版本都提供 **简洁版**（不含环境/模型，需联网一键部署）与 **懒人版**（含完整 .venv + 模型，解压即用）：
+输出目录：同级 **`umi-paddle-neoengine-release/`**
 
 | 包 | 引擎默认 | 包含 | 解压后 | 适合 |
 |----|------|------|--------|------|
-| **Local-Ocr_MKLDNN_简洁版.zip** | Paddle(MKLDNN) | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` 建环境 + 下载模型 → 打开 Umi-OCR | 有网、想拿最小包 |
-| **Local-Ocr_MKLDNN_懒人版.zip** | Paddle(MKLDNN) | 全部（含 `.venv/` + `paddlex/` 模型） | 直接双击 `Umi-OCR\Umi-OCR.exe` | 怕麻烦 / 离线机器 |
-| **Local-Ocr_ONNX_简洁版.zip** | ONNX Runtime | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` 建环境 + 下载模型 → 打开 Umi-OCR | 有网、想走 ONNX 旁路 |
-| **Local-Ocr_ONNX_懒人版.zip** | ONNX Runtime | 全部（含 `.venv/` + `paddlex/` 模型） | 直接双击 `Umi-OCR\Umi-OCR.exe` | 怕麻烦 / 离线 / 3.3.x 环境 |
+| **umi-paddle-neoengine-deploy.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
+| **umi-paddle-neoengine-ONNX-V6-CPU.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
 
-> 原 `Local-Ocr_懒人版.zip` 已重命名为 **`Local-Ocr_MKLDNN_懒人版.zip`** 保留（即双 CPU 完整版）。
-> 两个懒人版都**已把模型缓存重定向到插件自己的 `paddlex/` 目录**，故模型自带、行为一致。
+> 历史包名（`Local-Ocr_*_简洁版/懒人版` 等）已废弃，请使用上表两个文件名。  
+> 懒人包模型缓存在插件内 `paddlex/`，自包含。
 
 ---
 
