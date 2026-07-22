@@ -13,18 +13,16 @@
 
 ## 版本修订记录
 
-### v1.1（当前）
+| 版本 / 阶段 | 说明 |
+|-------------|------|
+| **1.1（当前）** | 批量文档：空白页 `median([])` 防护；Mission `forceRecover`；stop 杀引擎可再启；单页 OCR 超时。发布包仅 `deploy` + `ONNX-V6-CPU`（目录 `umi-paddle-neoengine-release/`）。完整包已内嵌宿主修复；仅插件场景用源码仓 `patches/umi-host/apply_host_patches.bat` |
+| **1.0 及更早** | 默认 **ONNX Runtime CPU**；可选 ONNX CUDA GPU、Paddle+MKLDNN；`setup.bat`、中文路径、模型自包含 `paddlex/` 等 |
 
-| 项 | 说明 |
-|----|------|
-| **批量文档** | 空白页 / 脏空 text 防 `median([])`；单页 OCR 超时后继续 |
-| **任务恢复** | Mission `forceRecover`；停止时杀 OCR 引擎，可再次提交任务 |
-| **发布包** | 仅保留两包（见下），输出目录 `umi-paddle-neoengine-release/` |
+**宿主补丁（可选）**：zip 解压即用无需 patch。官方 Umi + 只拷插件时：
 
-### v1.0 及更早
-
-- 默认 **ONNX Runtime CPU**；可选 ONNX CUDA GPU、Paddle+MKLDNN  
-- 部署 `setup.bat`、中文路径、模型自包含 `paddlex/` 等  
+```bat
+patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
+```
 
 ---
 

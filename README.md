@@ -10,11 +10,15 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.1**（见仓库根目录 [`VERSION`](./VERSION)，Git 标签 `v1.1`）  
+- **当前源码版本**：**1.1**（见仓库根目录 [`VERSION`](./VERSION)，Git 标签 `v1.1`；开发以 **`master`** 为准）  
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
   - `umi-paddle-neoengine-deploy.zip` — 纯净部署（需 `setup.bat`）  
-  - `umi-paddle-neoengine-ONNX-V6-CPU.zip` — ONNX V6 CPU 懒人包
+  - `umi-paddle-neoengine-ONNX-V6-CPU.zip` — ONNX V6 CPU 懒人包  
+- **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)  
+  - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行  
+    [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)  
+    （可拖入 `Umi-OCR` 目录；会先备份再覆盖 5 个文件）
 
 ---
 
@@ -255,28 +259,25 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 版本号写在仓库根目录 **`VERSION`**（当前 **`1.1`**），发布时打 Git 标签 **`v1.1`**。
 
-### v1.1（当前）
-
-| 项 | 说明 |
-|----|------|
-| **版本号** | `1.1` / 标签 `v1.1` |
-| **批量文档稳定性** | 空白页 / 脏空 text：`linePreprocessing` 防 `median([])` 崩溃 |
-| **任务工人恢复** | Mission `forceRecover` + worker epoch；`msnTask` 异常不再拖死整条队列 |
-| **停止可再启** | 批量文档 stop 时中断嵌套 OCR 并杀引擎；`BatchDOC.msnStop` 强制恢复工人槽 |
-| **单页超时** | 文档嵌套 OCR 等待最长约 180s，超时记本页错误并继续 |
-| **宿主补丁** | 完整包内嵌 Umi `py_src` 修复；源码对照见 [`patches/umi-host/`](./patches/umi-host/) |
-| **发布包命名** | `umi-paddle-neoengine-deploy.zip`、`umi-paddle-neoengine-ONNX-V6-CPU.zip` → 目录 `umi-paddle-neoengine-release/` |
-
-### 更早阶段
-
 | 版本 / 阶段 | 说明 |
 |-------------|------|
+| **1.1（当前）** | 批量文档：空白页 `median([])` 防护；Mission `forceRecover` / worker epoch；stop 杀引擎可再启；单页 OCR 约 180s 超时。发布包：`deploy` + `ONNX-V6-CPU`。宿主补丁见 [`patches/umi-host/`](./patches/umi-host/)，仅插件场景用 [`apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat) 一键覆盖 Umi `py_src` |
 | **1.0** | 默认引擎 `onnxruntime`；纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort；里程碑标签 `1.0` |
 | **GPU 路线** | `onnxruntime-gpu` + CUDA EP；DLL PATH 修复；缺 CUDA 自动回退 |
 | **MKLDNN 稳定** | 锁定 `paddlepaddle==3.2.1`，修复 3.3.x PIR/oneDNN 崩溃与 904 协议污染 |
 | **多语言与回退** | 韩/俄等无 v6 rec 时回退 v5；语言码映射（如 ru） |
 | **路径加固** | Windows 非 ASCII 路径下 Paddle 缓存改 8.3 短路径 |
 | **部署** | `setup.bat` 两段式；修复 echo `>` 误生成垃圾文件；打包排除 bench 与误产物 |
+
+**宿主补丁用法（v1.1）**：完整发布包已内嵌，无需再 patch。若把插件装进**官方原版 Umi**，先退出软件，再运行：
+
+```bat
+patches\umi-host\apply_host_patches.bat
+REM 或
+patches\umi-host\apply_host_patches.bat "D:\path\to\Umi-OCR"
+```
+
+会备份原文件后覆盖 `mission*.py` / `BatchDOC.py` / `line_preprocessing.py`。说明见 [`patches/umi-host/README.md`](./patches/umi-host/README.md)。
 
 更细的提交说明见本仓库 `git log`。
 
