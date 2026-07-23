@@ -8,3 +8,7 @@ engine_active.log
 *.zip
 *.7z
 
+# 本地文档/PDF 测试样张与截图，不随源码仓发布
+images/Testpage.png
+test-examples/
+
