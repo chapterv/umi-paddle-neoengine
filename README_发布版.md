@@ -28,16 +28,38 @@
   - 新增 `install_table_models.bat`，自动选择与 `run.cmd` 相同的
     `.venv_gpu → .venv` 环境，可用于老版本补装。
 
-### v1.1
+### v1.1（批量文档不再“停在那儿不动”）
 
-- 批量文档空白页 `median([])` 防护。
-- Mission `forceRecover`、stop 杀引擎可再启、单页 OCR 超时。
-- 发布包统一为 `deploy` + `ONNX-V6-CPU`，并提供宿主补丁安装器。
+这一版主要解决批量文档里的两种卡住方式：
 
-### v1.0 及更早
+1. **空白页 / 异常页让整个任务停住。**
+   - 问题：空白页没有任何文字框时，旧的排版预处理仍会计算 `median([])`；异常从文档
+     worker 冒出去后，界面还以为任务在运行，后续文件也无法继续处理。
+   - 修复：空文字框直接按空页返回；文档页的排版异常改为“记录这页错误、继续下一页”，
+     不再让整批任务被一张坏页拖死。
 
-- 默认 ONNX Runtime CPU；可选 ONNX CUDA GPU、Paddle+MKLDNN。
-- 完成 `setup.bat`、中文路径和插件内 `paddlex/` 模型缓存加固。
+2. **OCR 子进程没有返回，点“停止”后也无法再开始。**
+   - 问题：文档任务在等待 OCR 结果时可能永久阻塞；旧的停止操作只改任务状态，正在等待的
+     worker 没有机会检查状态，于是一直占着任务槽位。
+   - 修复：等待改成可定时醒来的循环，单页超时会中止等待；强制恢复会清空队列、终止底层
+     OCR 引擎并作废旧 worker，随后可以立即提交新任务。
+
+- 同时统一发布包名称为 `deploy` 与 `ONNX-V6-CPU`，并提供宿主补丁安装器。
+
+### v1.0（ONNX CUDA GPU 加速）
+
+- 问题：即使电脑有 NVIDIA 显卡，旧流程也主要吃 CPU；PP-OCRv6 在大图上的等待时间较长。
+- 修复：加入 ONNX Runtime CUDA 推理路径，安装时可选 GPU 环境；运行时会检查 CUDA 是否真的
+  可用，缺少 DLL、驱动不匹配或初始化失败时自动回退 CPU，并在结果标签和日志中说明原因。
+- 同一个插件因此可以在 **Paddle + MKLDNN、ONNX CPU、ONNX CUDA GPU** 三种后端之间切换，
+  用户不必换插件目录。
+
+### v0.9（ONNX CPU 默认）
+
+- 问题：没有 NVIDIA 显卡的用户仍需要一个稳定、容易部署的本地识别路径；Paddle / MKLDNN
+  的环境差异也容易让初次安装变得复杂。
+- 修复：把 ONNX Runtime CPU 作为默认选择，补齐 `setup.bat` 的安装检查，并提供纯净部署包与
+  含 V6 模型的 CPU 懒人包。没有 GPU 也能解压后直接开始识别。
 
 **宿主补丁（可选）**：zip 解压即用无需 patch。官方 Umi + 只拷插件时：
 
@@ -66,8 +88,8 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 
 | 包 | 引擎默认 | 包含 | 解压后 | 适合 |
 |----|------|------|--------|------|
-| **umi-paddle-neoengine-deploy.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
-| **umi-paddle-neoengine-ONNX-V6-CPU.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
+| **umi-paddle-neoengine-deploy-v1.2.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
+| **umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
 
 > 历史包名（`Local-Ocr_*_简洁版/懒人版` 等）已废弃，请使用上表两个文件名。  
 > 懒人包模型缓存在插件内 `paddlex/`，自包含。

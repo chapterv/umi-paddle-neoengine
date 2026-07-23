@@ -13,8 +13,8 @@
 - **当前源码版本**：**1.2**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
-  - `umi-paddle-neoengine-deploy.zip` — 纯净部署（需 `setup.bat`）  
-  - `umi-paddle-neoengine-ONNX-V6-CPU.zip` — ONNX V6 CPU 懒人包  
+  - `umi-paddle-neoengine-deploy-v1.2.zip` — 纯净部署（需 `setup.bat`）
+  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip` — ONNX V6 CPU 懒人包
 - **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)  
   - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行  
     [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)  
@@ -86,6 +86,25 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 - v6 比 v3 **质量更好**，但若 MKLDNN 关错或环境不对，会慢到不可用（图 1）。  
 - 纯 CPU 上 v6 常见 **十余秒** 量级（图 2/3）；要「秒级」需 **ONNX + CUDA**（图 4）。  
 - GUI 里若打开 **文档去扭曲 / 方向纠正** 等预处理，GPU 也会从 ~1.9s 涨到 ~3s，属正常（多跑模型，不是 GPU 失效）。
+
+---
+
+### 表格识别效果：原图、V3 / V6 与 Excel
+
+下面用同一张出入库表做对比。先看原图，再看旧 PP-OCRv3 与本插件 PP-OCRv6
+的识别结果；每一列下方都是把对应结果粘贴进 Excel 后的样子。
+
+**原始样张：**
+
+![表格原始样张](images/样章-表格.png)
+
+| 旧 PP-OCRv3 | 本插件 PP-OCRv6 |
+|---|---|
+| ![表格 v3 识别结果](images/样章-表格v3.png) | ![表格 v6 识别结果](images/样章-表格v6.png) |
+| **粘贴到 Excel 后**<br>![表格 v3 Excel](images/样章-表格v3-excel.png) | **粘贴到 Excel 后**<br>![表格 v6 Excel](images/样章-表格v6-excel.png) |
+
+> 这组图用于直观看识别文本和表格落格的差别。规整表格优先使用 P0 几何方式；
+> 合并单元格、无线框等难表再按需开启 P1 结构模型。
 
 ---
 
@@ -204,8 +223,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 ### 方式 A：完整发布包（推荐最终用户）
 
 1. 从 `umi-paddle-neoengine-release/` 取 zip：  
-   - **`umi-paddle-neoengine-deploy.zip`**：小包，需联网 `setup.bat`  
-   - **`umi-paddle-neoengine-ONNX-V6-CPU.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU  
+   - **`umi-paddle-neoengine-deploy-v1.2.zip`**：小包，需联网 `setup.bat`
+   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU
 2. 解压到**尽量纯英文路径**（如 `C:\Local-Ocr\`；中文路径下 paddle 原生更易出问题，ONNX 相对稳）  
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  
@@ -262,6 +281,10 @@ P0 不安装新模型，适合边框清楚、行列规整的表：
 输出遵循页面的 **保存到** 设置，文件名以 `_table.csv` 结尾，编码为 UTF-8
 BOM，可直接用 Excel 打开。
 
+**设置 A：在批量 OCR 的「保存文件类型」中勾选 `table.csv`。**
+
+![设置 A：勾选 table.csv 结构表格输出](images/样章-表格设置A.png)
+
 ### P1 模型方式（可选）
 
 P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步输入 `Y`，或运行
@@ -274,6 +297,10 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 5. 点击绿色按钮 **`应用修改`**；看到“文字识别接口应用成功”后生效。
 6. 回到批量识图/批量文档，勾选
    **`table.csv 结构表格(Excel)`**输出。
+
+**设置 B：在「全局设置 → 文字识别」中开启 P1 表格结构模型，并点击「应用修改」。**
+
+![设置 B：开启 P1 表格结构模型](images/样章-表格设置B.png)
 
 | 项目 | P0 几何方式 | P1 结构模型 |
 |------|-------------|-------------|
@@ -332,15 +359,38 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
   - 新增 `install_table_models.bat` 老用户升级入口。
   - 宿主补丁从 5 个扩展到 15 个，覆盖表格解析、导出和 QML 开关。
 
-### v1.1
+### v1.1（批量文档不再“停在那儿不动”）
 
-- 修复批量文档空白页 `median([])`、Mission worker 恢复、停止后可再启和单页超时。
-- 统一 `deploy` / `ONNX-V6-CPU` 发布包，并提供宿主补丁安装器。
+这一版主要解决批量文档里的两种卡住方式：
 
-### v1.0 及更早
+1. **空白页 / 异常页让整个任务停住。**
+   - 问题：空白页没有任何文字框时，旧的排版预处理仍会计算 `median([])`；异常从文档
+     worker 冒出去后，界面还以为任务在运行，后续文件也无法继续处理。
+   - 修复：空文字框直接按空页返回；文档页的排版异常改为“记录这页错误、继续下一页”，
+     不再让整批任务被一张坏页拖死。
 
-- 默认 ONNX CPU；可选 ONNX CUDA GPU、Paddle+MKLDNN。
-- 完成多语言回退、Windows 中文路径、setup 和模型缓存加固。
+2. **OCR 子进程没有返回，点“停止”后也无法再开始。**
+   - 问题：文档任务在等待 OCR 结果时可能永久阻塞；旧的停止操作只改任务状态，正在等待的
+     worker 没有机会检查状态，于是一直占着任务槽位。
+   - 修复：等待改成可定时醒来的循环，单页超时会中止等待；强制恢复会清空队列、终止底层
+     OCR 引擎并作废旧 worker，随后可以立即提交新任务。
+
+- 同时统一发布包名称为 `deploy` 与 `ONNX-V6-CPU`，并提供宿主补丁安装器。
+
+### v1.0（ONNX CUDA GPU 加速）
+
+- 问题：即使电脑有 NVIDIA 显卡，旧流程也主要吃 CPU；PP-OCRv6 在大图上的等待时间较长。
+- 修复：加入 ONNX Runtime CUDA 推理路径，安装时可选 GPU 环境；运行时会检查 CUDA 是否真的
+  可用，缺少 DLL、驱动不匹配或初始化失败时自动回退 CPU，并在结果标签和日志中说明原因。
+- 同一个插件因此可以在 **Paddle + MKLDNN、ONNX CPU、ONNX CUDA GPU** 三种后端之间切换，
+  用户不必换插件目录。
+
+### v0.9（ONNX CPU 默认）
+
+- 问题：没有 NVIDIA 显卡的用户仍需要一个稳定、容易部署的本地识别路径；Paddle / MKLDNN
+  的环境差异也容易让初次安装变得复杂。
+- 修复：把 ONNX Runtime CPU 作为默认选择，补齐 `setup.bat` 的安装检查，并提供纯净部署包与
+  含 V6 模型的 CPU 懒人包。没有 GPU 也能解压后直接开始识别。
 
 **宿主补丁用法（v1.2）**：完整发布包已内嵌，无需再 patch。若把插件装进
 **官方原版 Umi**，先退出软件，再运行：
