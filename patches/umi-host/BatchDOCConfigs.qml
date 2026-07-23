@@ -108,6 +108,17 @@ Configs {
                     "toolTip": qsTr("创建空白PDF文档，只写入识别文字，不含图片"),
                     "default": false,
                 },
+                "pdfOneLayerDirection": {
+                    "title": qsTr("text.pdf 文字方向"),
+                    "toolTip": qsTr("仅影响单层纯文本 PDF。自动模式按 OCR 文字框判断横排或竖排；双层可搜索 PDF 始终自动匹配原图方向。"),
+                    "enabledBy": "mission.filesType.pdfOneLayer",
+                    "optionsList": [
+                        ["auto", qsTr("自动（按 OCR 框方向）")],
+                        ["horizontal", qsTr("统一横排")],
+                        ["vertical", qsTr("统一竖排")],
+                    ],
+                    "default": "auto",
+                },
                 "txt": {
                     "title": qsTr("txt 标准格式"),
                     "toolTip": qsTr("含识别文字和页数信息"),

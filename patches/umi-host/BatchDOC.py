@@ -132,14 +132,20 @@ class BatchDOC(Page):
             "ignoreBlank": argd["mission.ignoreBlank"],  # 忽略空白文件
             "originPath": path,  # 原始文件名
             "password": password,  # 文档密码
+            "pdfOneLayerDirection": argd.get(
+                "mission.filesType.pdfOneLayerDirection", "auto"
+            ),
         }
 
         # =============== 实例化输出器对象 ===============
         output = []
         try:
             for key in argd.keys():
-                if "mission.filesType" in key and argd[key]:
-                    output.append(Output[key[18:]](outputArgd))
+                if not key.startswith("mission.filesType."):
+                    continue
+                outputType = key[len("mission.filesType.") :]
+                if outputType in Output and argd[key]:
+                    output.append(Output[outputType](outputArgd))
         except Exception as e:
             return f"[Error] 初始化输出器失败。{e}"
         return output

@@ -1,17 +1,33 @@
 # Local-Ocr · Umi-OCR 新引擎（PP-OCRv6）发布包
 
-**当前版本：1.2**（与源码仓 `VERSION` 对齐）
+**当前版本：1.3**（与源码仓 `VERSION` 对齐）
 
 把 Umi-OCR v2.1.5 内置的 PP-OCRv3 引擎，升级为官方最新 **PaddleOCR 3.x** 路线
 （推荐 **PP-OCRv6 medium** + **ONNX Runtime**，可在设置里切 v5/v4 与 Paddle/MKLDNN）。
 
-> **v1.2**：新增 P0 几何表格 CSV、P1 可选结构模型，以及 setup/升级安装入口。
+> **v1.3**：修复竖排双层 PDF 的文字方向与浏览器复制顺序，并为单层 PDF
+> 增加自动/横排/竖排选择。
 > 锁定 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 在 Windows/CPU 下易崩，勿擅自升级）。  
 > 公开源码：<https://github.com/chapterv/umi-paddle-neoengine>
 
 ---
 
 ## 更新日志
+
+### v1.3（2026-07-24）
+
+- **竖排双层可搜索 PDF**
+  - 自动识别窄高竖排文字框，字符保持直立，选择区域与原图竖列对齐。
+  - 复制竖排段落时，栏内从上到下、栏间从右到左，并沿用 OCR 的标点与
+    句子连接；不再由 Chrome / Edge 按页面横坐标改成左到右。
+  - 原始扫描图像保持不变；横排文档继续使用原有写入方式。
+- **单层纯文字 PDF**
+  - 勾选 `text.pdf 单层纯文本文档` 后，可设置
+    `自动（保留 OCR 排版）`、`统一横排`或`统一竖排`。
+  - 自动为默认值，允许同一页横竖混排；该设置不影响双层 PDF。
+- **兼容验证**
+  - Chrome、Edge 复制验收通过；PyMuPDF 与 pypdf 两页竖排段落检查
+    分别为 44/44、71/71。
 
 ### v1.2（2026-07-23）
 
@@ -82,14 +98,14 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 
 ---
 
-## 当前发布包（v1.2）
+## 当前发布包（v1.3）
 
 输出目录：同级 **`umi-paddle-neoengine-release/`**
 
 | 包 | 引擎默认 | 包含 | 解压后 | 适合 |
 |----|------|------|--------|------|
-| **umi-paddle-neoengine-deploy-v1.2.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
-| **umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
+| **umi-paddle-neoengine-deploy-v1.3.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
+| **umi-paddle-neoengine-ONNX-V6-CPU-v1.3.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
 
 > 历史包名（`Local-Ocr_*_简洁版/懒人版` 等）已废弃，请使用上表两个文件名。  
 > 懒人包模型缓存在插件内 `paddlex/`，自包含。

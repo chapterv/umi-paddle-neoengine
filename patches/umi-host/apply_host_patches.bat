@@ -4,7 +4,7 @@ chcp 65001 >nul 2>&1
 cd /d "%~dp0"
 
 echo.
-echo === umi-paddle-neoengine host patch deploy v1.2 ===
+echo === umi-paddle-neoengine host patch deploy v1.3 ===
 echo Patch dir: %~dp0
 echo.
 
@@ -21,10 +21,14 @@ if not exist "%PATCH_DIR%line_preprocessing.py" set "MISS=1"
 if not exist "%PATCH_DIR%output_init.py" set "MISS=1"
 if not exist "%PATCH_DIR%output_table_csv.py" set "MISS=1"
 if not exist "%PATCH_DIR%output_tools.py" set "MISS=1"
+if not exist "%PATCH_DIR%output_pdf_layered.py" set "MISS=1"
+if not exist "%PATCH_DIR%output_pdf_one_layer.py" set "MISS=1"
 if not exist "%PATCH_DIR%tbpu_init.py" set "MISS=1"
 if not exist "%PATCH_DIR%parser_table_grid.py" set "MISS=1"
 if not exist "%PATCH_DIR%table_grid.py" set "MISS=1"
 if not exist "%PATCH_DIR%UtilsConfigDicts.qml" set "MISS=1"
+if not exist "%PATCH_DIR%ConfigItemComp.qml" set "MISS=1"
+if not exist "%PATCH_DIR%Configs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%BatchDOCConfigs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%BatchOCRConfigs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%ResultsTableView.qml" set "MISS=1"
@@ -104,10 +108,14 @@ copy /Y "%PY_SRC%\ocr\tbpu\parser_tools\line_preprocessing.py" "%BAK%\parser_too
 copy /Y "%PY_SRC%\ocr\output\__init__.py" "%BAK%\ocr\output\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\output\output_table_csv.py" "%BAK%\ocr\output\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\output\tools.py" "%BAK%\ocr\output\" >nul 2>&1
+copy /Y "%PY_SRC%\ocr\output\output_pdf_layered.py" "%BAK%\ocr\output\" >nul 2>&1
+copy /Y "%PY_SRC%\ocr\output\output_pdf_one_layer.py" "%BAK%\ocr\output\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\tbpu\__init__.py" "%BAK%\ocr\tbpu\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\tbpu\parser_table_grid.py" "%BAK%\ocr\tbpu\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\tbpu\parser_tools\table_grid.py" "%BAK%\ocr\tbpu\parser_tools\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\Configs\UtilsConfigDicts.qml" "%BAK%\qt_res\qml\Configs\" >nul 2>&1
+copy /Y "%DATA_ROOT%\qt_res\qml\Configs\ConfigItemComp.qml" "%BAK%\qt_res\qml\Configs\" >nul 2>&1
+copy /Y "%DATA_ROOT%\qt_res\qml\Configs\Configs.qml" "%BAK%\qt_res\qml\Configs\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\TabPages\BatchDOC\BatchDOCConfigs.qml" "%BAK%\qt_res\qml\TabPages\BatchDOC\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\TabPages\BatchOCR\BatchOCRConfigs.qml" "%BAK%\qt_res\qml\TabPages\BatchOCR\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\Widgets\ResultLayout\ResultsTableView.qml" "%BAK%\qt_res\qml\Widgets\ResultLayout\" >nul 2>&1
@@ -130,6 +138,10 @@ copy /Y "%PATCH_DIR%output_table_csv.py" "%PY_SRC%\ocr\output\output_table_csv.p
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%output_tools.py" "%PY_SRC%\ocr\output\tools.py" >nul
 if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%output_pdf_layered.py" "%PY_SRC%\ocr\output\output_pdf_layered.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%output_pdf_one_layer.py" "%PY_SRC%\ocr\output\output_pdf_one_layer.py" >nul
+if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%tbpu_init.py" "%PY_SRC%\ocr\tbpu\__init__.py" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%parser_table_grid.py" "%PY_SRC%\ocr\tbpu\parser_table_grid.py" >nul
@@ -137,6 +149,10 @@ if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%table_grid.py" "%PY_SRC%\ocr\tbpu\parser_tools\table_grid.py" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%UtilsConfigDicts.qml" "%DATA_ROOT%\qt_res\qml\Configs\UtilsConfigDicts.qml" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%ConfigItemComp.qml" "%DATA_ROOT%\qt_res\qml\Configs\ConfigItemComp.qml" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%Configs.qml" "%DATA_ROOT%\qt_res\qml\Configs\Configs.qml" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%BatchDOCConfigs.qml" "%DATA_ROOT%\qt_res\qml\TabPages\BatchDOC\BatchDOCConfigs.qml" >nul
 if errorlevel 1 goto COPYFAIL
@@ -153,7 +169,7 @@ if exist "%PY_SRC%\ocr\tbpu\parser_tools\__pycache__" rd /s /q "%PY_SRC%\ocr\tbp
 
 echo.
 echo === DONE ===
-echo 15 host patches applied. Restart Umi-OCR.
+echo 19 host patches applied. Restart Umi-OCR.
 echo Rollback from: %BAK%
 echo.
 pause

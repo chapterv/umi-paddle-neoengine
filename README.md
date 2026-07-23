@@ -2,7 +2,7 @@
 
 **Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
-[![Version](https://img.shields.io/badge/version-1.2-orange)](./VERSION)
+[![Version](https://img.shields.io/badge/version-1.3-orange)](./VERSION)
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
@@ -10,15 +10,15 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.2**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
+- **当前源码版本**：**1.3**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
-  - `umi-paddle-neoengine-deploy-v1.2.zip` — 纯净部署（需 `setup.bat`）
-  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip` — ONNX V6 CPU 懒人包
-- **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)  
-  - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行  
-    [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)  
-    （可拖入 `Umi-OCR` 目录；会先备份再覆盖 5 个文件）
+  - `umi-paddle-neoengine-deploy-v1.3.zip` — 纯净部署（需 `setup.bat`）
+  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.3.zip` — ONNX V6 CPU 懒人包
+- **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)
+  - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行
+    [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)
+    （可拖入 `Umi-OCR` 目录；会先备份再覆盖 19 个文件）
 
 ---
 
@@ -223,8 +223,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 ### 方式 A：完整发布包（推荐最终用户）
 
 1. 从 `umi-paddle-neoengine-release/` 取 zip：  
-   - **`umi-paddle-neoengine-deploy-v1.2.zip`**：小包，需联网 `setup.bat`
-   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.2.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU
+   - **`umi-paddle-neoengine-deploy-v1.3.zip`**：小包，需联网 `setup.bat`
+   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.3.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU
 2. 解压到**尽量纯英文路径**（如 `C:\Local-Ocr\`；中文路径下 paddle 原生更易出问题，ONNX 相对稳）  
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  
@@ -318,6 +318,22 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 
 ---
 
+## 竖排 PDF 与复制顺序
+
+- **双层 `.layered.pdf`**：无需开关。系统自动判断横排/竖排文字框；竖排字符
+  保持直立并覆盖原竖列。跨栏复制按 OCR 阅读顺序输出，即栏内从上到下、
+  栏间从右到左，保留 OCR 标点和句子连接。
+- **单层 `.text.pdf`**：进入
+  **批量文档 → 设置 → 保存文件类型**，勾选
+  **`text.pdf 单层纯文本文档`** 后，在下方选择
+  **单层 PDF 排版方向**：
+  - `自动（保留 OCR 排版）`：默认，允许同页横竖混排。
+  - `统一横排`：所有文字块按横向排版。
+  - `统一竖排`：所有多字符文字块按纵向排版。
+- 单层方向选项不会改变双层 PDF；双层始终自动对齐原始扫描图。
+
+---
+
 ## 配置说明
 
 | 配置项 | 建议 | 说明 |
@@ -346,7 +362,20 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 
 ## 更新日志
 
-版本号写在仓库根目录 **`VERSION`**（当前 **`1.2`**）。
+版本号写在仓库根目录 **`VERSION`**（当前 **`1.3`**）。
+
+### v1.3（2026-07-24）
+
+- **修复竖排双层 PDF**
+  - 自动识别窄高竖排框，字符保持直立并对齐原图。
+  - Chrome / Edge 跨栏复制改为 OCR 阅读顺序：栏内上到下、栏间右到左，
+    标点和句子连续。
+- **新增单层 PDF 排版方向**
+  - `text.pdf` 可选择自动、统一横排或统一竖排；默认自动。
+  - 双层 PDF 始终自动，不受该设置影响。
+- **验证与阶段调整**
+  - 真实两页 PDF 的 PyMuPDF / pypdf 竖排段落检查分别为 44/44、71/71。
+  - 表格 P0/P1 当前实现保持不变，进一步识别优化列为远期 P2。
 
 ### v1.2（2026-07-23）
 
@@ -396,7 +425,7 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 - 修复：把 ONNX Runtime CPU 作为默认选择，补齐 `setup.bat` 的安装检查，并提供纯净部署包与
   含 V6 模型的 CPU 懒人包。没有 GPU 也能解压后直接开始识别。
 
-**宿主补丁用法（v1.2）**：完整发布包已内嵌，无需再 patch。若把插件装进
+**宿主补丁用法（v1.3）**：完整发布包已内嵌，无需再 patch。若把插件装进
 **官方原版 Umi**，先退出软件，再运行：
 
 ```bat
@@ -405,7 +434,7 @@ REM 或
 patches\umi-host\apply_host_patches.bat "D:\path\to\Umi-OCR"
 ```
 
-会备份原文件后覆盖批量任务和表格功能所需的 15 个宿主文件。说明见
+会备份原文件后覆盖批量任务、表格和 PDF 文字层所需的 19 个宿主文件。说明见
 [`patches/umi-host/README.md`](./patches/umi-host/README.md)。
 
 更细的提交说明见本仓库 `git log`。
