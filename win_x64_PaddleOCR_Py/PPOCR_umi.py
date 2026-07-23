@@ -64,6 +64,7 @@ class Api:  # 公开接口
             cfg["ocr_version"] = _ver
         if "cpu_threads" in globalData:
             cfg["cpu_threads"] = globalData["cpu_threads"]
+        cfg["table_structure"] = bool(globalData.get("table_structure", False))
         # ── 语言 / 限制边长（局部项，仅窗口级有）──
         lang = (localData or {}).get("language")
         if lang:
@@ -143,19 +144,24 @@ class Api:  # 公开接口
 
     def runPath(self, imgPath: str):  # 路径识图
         self.__runBefore()
-        res = self.api.run(imgPath)
+        if self.exeConfigs.get("table_structure"):
+            res = self.api.runDict({"image_path": imgPath, "task": "table"})
+        else:
+            res = self.api.run(imgPath)
         self.__ramClear()
         return res
 
     def runBytes(self, imageBytes):  # 字节流
         self.__runBefore()
-        res = self.api.runBytes(imageBytes)
+        task = "table" if self.exeConfigs.get("table_structure") else None
+        res = self.api.runBytes(imageBytes, task=task)
         self.__ramClear()
         return res
 
     def runBase64(self, imageBase64):  # base64字符串
         self.__runBefore()
-        res = self.api.runBase64(imageBase64)
+        task = "table" if self.exeConfigs.get("table_structure") else None
+        res = self.api.runBase64(imageBase64, task=task)
         self.__ramClear()
         return res
 

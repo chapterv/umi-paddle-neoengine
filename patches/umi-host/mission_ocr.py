@@ -14,6 +14,8 @@ from umi_log import logger
 from .mission import Mission
 from ..ocr.tbpu import getParser, IgnoreArea
 from ..ocr.api import getApiOcr, getLocalOptions
+from ..ocr.output.tools import ensure_geometry_table_on_res, promote_table_on_res
+from ..ocr.tbpu.parser_tools.table_grid import build_table
 from ..utils.utils import argdIntConvert
 
 # 合法文件后缀
@@ -117,6 +119,13 @@ class __MissionOcrClass(Mission):
             if num > 0:
                 score /= num
             res["score"] = score
+            # tableCsv 是结构请求：必须在普通排版 tbpu 改写原始 blocks 前建表。
+            # 结构模型已返回 table 时 helper 会原样保留。
+            res = ensure_geometry_table_on_res(
+                res,
+                bool(msnInfo["argd"].get("mission.filesType.tableCsv")),
+                build_table,
+            )
             # 执行 tbpu（与 DOC 侧一致：单页失败不得拖死工人）
             if msnInfo.get("tbpu"):
                 for tbpu in msnInfo["tbpu"]:
@@ -136,6 +145,8 @@ class __MissionOcrClass(Mission):
                         res["code"] = 101
                         res["data"] = ""
                         break
+            # 表格网格等：提升 last_table / _table → res["table"]
+            res = promote_table_on_res(res, msnInfo.get("tbpu"))
         return res
 
     def _onStopRequested(self, msnIDs):

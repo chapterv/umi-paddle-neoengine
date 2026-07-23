@@ -2,7 +2,7 @@
 
 **Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
-[![Version](https://img.shields.io/badge/version-1.1-orange)](./VERSION)
+[![Version](https://img.shields.io/badge/version-1.2-orange)](./VERSION)
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
@@ -10,7 +10,7 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.1**（见仓库根目录 [`VERSION`](./VERSION)，Git 标签 `v1.1`；开发以 **`master`** 为准）  
+- **当前源码版本**：**1.2**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
   - `umi-paddle-neoengine-deploy.zip` — 纯净部署（需 `setup.bat`）  
@@ -58,6 +58,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 - 可选：**ONNX Runtime CUDA GPU**（同图热身约 **1.5～2s** 级，视预处理开关而定）  
 - 可选：**Paddle 原生 + MKLDNN**（CPU 加速，须钉死 3.2.1）  
 - 模型缓存到插件内 **`paddlex/`**，懒人包可预置、纯净包可首次自动下载  
+- P0 几何表格 CSV 默认可用；P1 复杂表结构模型按需安装、默认关闭
+- 官方原版 Umi 如需表格 UI/导出，运行 [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)
 
 一句话：**Umi 壳子不动，本地识别引擎换代到 PP-OCRv6，并可选 GPU。**
 
@@ -177,7 +179,9 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 | **文档预处理** | 方向纠正 / 去扭曲(UVDoc) / 行方向（可关以换速度） |
 | **协议兼容** | 兼容 Umi `PPOCR_api` JSON 管道；修复 oneDNN 污染 stdout 导致的 904 |
 | **中文路径** | Paddle 原生在「发布包」等中文路径下易失败；已做 8.3 短路径规避 |
-| **部署脚本** | 根目录 `setup.bat`：模型范围 + 推理后端（CPU/GPU）两段式安装 |
+| **P0 几何表格** | OCR 坐标自动重建行列；输出 UTF-8 BOM 结构 CSV，无额外模型 |
+| **P1 结构模型** | `TableRecognitionPipelineV2`；复杂有线/无线表和合并表头；失败回退 P0 |
+| **部署脚本** | `setup.bat` 安装基础 OCR 并可选 P1；`install_table_models.bat` 供老用户补装 |
 | **双发布形态** | 纯净包（小、需 setup）/ ONNX V6 CPU 懒人包（大、含 venv+模型） |
 
 ---
@@ -206,11 +210,21 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  
    - 推理后端：默认 **[2] 纯 CPU**；有 N 卡选 **[1] GPU**，第 3 步默认 **1.26 + CUDA12.9**  
+   - 第 4 步询问 P1 表格结构模型；直接回车默认跳过，需要时输入 `Y`
 4. 运行 `Umi-OCR\Umi-OCR.exe`  
 5. **全局设置 → 文字识别**：引擎选本插件（PaddleOCR 新引擎）  
 6. 推理引擎建议：  
    - 无 GPU / 要稳 → **ONNX Runtime CPU**  
    - 有 N 卡要快 → **ONNX Runtime CUDA GPU**（并视需要关闭「文档去扭曲」以接近 ~2s）  
+
+已有基础环境，只补装 P1：
+
+```bat
+install_table_models.bat
+```
+
+脚本会按 `run.cmd` 相同顺序选择 `.venv_gpu → .venv`。使用 `--check` 可只检查，
+`--deps-only` 可只安装依赖、把模型下载延后到首次启用。
 
 ### 方式 B：仅插件源码（开发者）
 
@@ -230,6 +244,49 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ---
 
+## 表格识别与结构 CSV
+
+### P0 几何方式（默认可用）
+
+P0 不安装新模型，适合边框清楚、行列规整的表：
+
+1. 打开 **批量识图**或**批量文档**。
+2. 右侧进入 **设置**。
+3. 展开 **保存文件类型**，勾选
+   **`table.csv 结构表格(Excel)`**。
+4. 开始任务。系统会在普通排版前使用原始 OCR 坐标自动建立二维表。
+5. 如果还要在结果区预览 TSV 表格，在
+   **OCR文本后处理 → 排版解析方案**选择
+   **`表格-几何网格`**。
+
+输出遵循页面的 **保存到** 设置，文件名以 `_table.csv` 结尾，编码为 UTF-8
+BOM，可直接用 Excel 打开。
+
+### P1 模型方式（可选）
+
+P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步输入 `Y`，或运行
+`install_table_models.bat`；额外模型约 955 MB。安装后：
+
+1. 完全退出并重启 Umi-OCR。
+2. 进入 **全局设置 → 文字识别**。
+3. 确认 **当前接口**是本项目 PaddleOCR 本地新引擎。
+4. 开启 **`表格结构模型（P1·可选）`**。
+5. 点击绿色按钮 **`应用修改`**；看到“文字识别接口应用成功”后生效。
+6. 回到批量识图/批量文档，勾选
+   **`table.csv 结构表格(Excel)`**输出。
+
+| 项目 | P0 几何方式 | P1 结构模型 |
+|------|-------------|-------------|
+| 安装 | 默认已有 | 可选依赖 + 约 955 MB 模型 |
+| 原理 | 文本框坐标聚类 | SLANeXt/单元格检测 + OCR 填格 |
+| 速度/内存 | 轻量 | 冷启动和内存明显更高 |
+| 规整表 | 推荐 | 可用 |
+| 无线/复杂表 | 有限 | 通常更好 |
+| 合并单元格 | CSV 展开/近似 | 保留 HTML rowspan/colspan 后展开到 CSV |
+| 失败处理 | 无模型失败点 | 自动回退 P0，不破坏普通 OCR |
+
+---
+
 ## 配置说明
 
 | 配置项 | 建议 | 说明 |
@@ -241,6 +298,7 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 | **限制边长** | 默认约 1920 | 过大更慢；过小损小字 |
 | **CPU 线程** | 按机器核数 | 主要影响 paddle/CPU 路径 |
 | **语言** | 与图片语种一致 | 韩文务必选韩语，勿用中文模型硬识 |
+| **表格结构模型（P1·可选）** | 默认关闭 | 开启后需点击“应用修改”；用于复杂表，失败回退 P0 |
 
 **如何确认 GPU 生效：**  
 识别结果耗时旁或日志中出现 `gpu(cuda)` / `gpu(onnx-cuda)`；若出现回退 CPU 的 WARN，检查是否装了 `onnxruntime-gpu` 且驱动正常。
@@ -255,21 +313,37 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 
 ---
 
-## 版本修订记录
+## 更新日志
 
-版本号写在仓库根目录 **`VERSION`**（当前 **`1.1`**），发布时打 Git 标签 **`v1.1`**。
+版本号写在仓库根目录 **`VERSION`**（当前 **`1.2`**）。
 
-| 版本 / 阶段 | 说明 |
-|-------------|------|
-| **1.1（当前）** | 批量文档：空白页 `median([])` 防护；Mission `forceRecover` / worker epoch；stop 杀引擎可再启；单页 OCR 约 180s 超时。发布包：`deploy` + `ONNX-V6-CPU`。宿主补丁见 [`patches/umi-host/`](./patches/umi-host/)，仅插件场景用 [`apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat) 一键覆盖 Umi `py_src` |
-| **1.0** | 默认引擎 `onnxruntime`；纯净包 + ONNX V6 CPU 懒人包；setup 校验 ort；里程碑标签 `1.0` |
-| **GPU 路线** | `onnxruntime-gpu` + CUDA EP；DLL PATH 修复；缺 CUDA 自动回退 |
-| **MKLDNN 稳定** | 锁定 `paddlepaddle==3.2.1`，修复 3.3.x PIR/oneDNN 崩溃与 904 协议污染 |
-| **多语言与回退** | 韩/俄等无 v6 rec 时回退 v5；语言码映射（如 ru） |
-| **路径加固** | Windows 非 ASCII 路径下 Paddle 缓存改 8.3 短路径 |
-| **部署** | `setup.bat` 两段式；修复 echo `>` 误生成垃圾文件；打包排除 bench 与误产物 |
+### v1.2（2026-07-23）
 
-**宿主补丁用法（v1.1）**：完整发布包已内嵌，无需再 patch。若把插件装进**官方原版 Umi**，先退出软件，再运行：
+- **新增 P0 几何表格导出**
+  - 新增 `表格-几何网格` 排版和 `table.csv 结构表格(Excel)` 输出。
+  - 结构 CSV 在普通排版前直接使用原始 OCR 坐标建表，不再从纯文本猜列。
+  - CSV 使用 UTF-8 BOM，可直接用 Excel 打开。
+- **新增 P1 可选结构模型**
+  - 接入 `TableRecognitionPipelineV2`，复用 PP-OCRv6 文本块。
+  - 支持 HTML 合并表头；模型失败自动回退 P0。
+  - 默认关闭，约 955 MB 模型不进入基础安装。
+- **安装与宿主补丁**
+  - `setup.bat` 第 4 步可选安装 P1；直接回车默认跳过。
+  - 新增 `install_table_models.bat` 老用户升级入口。
+  - 宿主补丁从 5 个扩展到 15 个，覆盖表格解析、导出和 QML 开关。
+
+### v1.1
+
+- 修复批量文档空白页 `median([])`、Mission worker 恢复、停止后可再启和单页超时。
+- 统一 `deploy` / `ONNX-V6-CPU` 发布包，并提供宿主补丁安装器。
+
+### v1.0 及更早
+
+- 默认 ONNX CPU；可选 ONNX CUDA GPU、Paddle+MKLDNN。
+- 完成多语言回退、Windows 中文路径、setup 和模型缓存加固。
+
+**宿主补丁用法（v1.2）**：完整发布包已内嵌，无需再 patch。若把插件装进
+**官方原版 Umi**，先退出软件，再运行：
 
 ```bat
 patches\umi-host\apply_host_patches.bat
@@ -277,7 +351,8 @@ REM 或
 patches\umi-host\apply_host_patches.bat "D:\path\to\Umi-OCR"
 ```
 
-会备份原文件后覆盖 `mission*.py` / `BatchDOC.py` / `line_preprocessing.py`。说明见 [`patches/umi-host/README.md`](./patches/umi-host/README.md)。
+会备份原文件后覆盖批量任务和表格功能所需的 15 个宿主文件。说明见
+[`patches/umi-host/README.md`](./patches/umi-host/README.md)。
 
 更细的提交说明见本仓库 `git log`。
 

@@ -171,6 +171,15 @@ globalOptions = {
         "min": 1,
         "isInt": True,
     },
+    "table_structure": {
+        "title": tr("表格结构模型（P1·可选）"),
+        "default": False,
+        "toolTip": tr(
+            "开启后，本插件按 task=table 使用 PaddleOCR TableRecognitionPipelineV2。"
+            "首次使用会下载额外表结构权重；失败自动回退现有几何网格。"
+            "默认关闭，不增加普通 OCR 的启动时间与模型体积。"
+        ),
+    },
     # 内存占用 / 闲时清理：保持靠后（在线程数之后、文档预处理之前）
     "ram_max": {
         "title": tr("内存占用限制"),

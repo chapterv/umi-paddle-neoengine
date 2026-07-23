@@ -63,6 +63,7 @@ import io
 import json
 import base64
 import argparse
+import importlib.util
 import time
 import gc
 import tempfile
@@ -123,6 +124,7 @@ if _PADDLEX_HOME != os.path.join(_HERE, "paddlex"):
         pass
 
 from paddleocr import PaddleOCR
+from table_structure import attach_table_result, structure_output_to_table
 
 # ── 白边补丁常量（解决边缘丢字问题）───────────────────────────────
 PAD = 50  # 四边各留 50px 白色边距（实测 margin≥50 不丢字）
@@ -137,6 +139,11 @@ parser.add_argument("--limit_side_len", default="1920")
 parser.add_argument("--cpu_threads", default="6")
 parser.add_argument("--enable_mkldnn", default="True")  # paddlepaddle 3.2.1 已修复 PIR bug
 parser.add_argument("--ocr_version", default=None)  # 覆盖默认版本优先级
+parser.add_argument(
+    "--table_structure",
+    default="False",
+    help="是否允许宿主发送 task=table；默认关闭，模型首次使用时才加载",
+)
 # ── 文档预处理开关（默认开，对齐 PaddleOCR 3.x 原生行为；GUI 可关）──
 parser.add_argument("--use_doc_orientation", default=None,
                     help="文档方向纠正（整图旋转）：None=默认开 / true/false")
@@ -201,6 +208,7 @@ elif args.use_angle_cls is not None:
 cpu_threads = int(args.cpu_threads)
 limit_side_len = int(args.limit_side_len)
 enable_mkldnn = to_bool(args.enable_mkldnn)  # paddlepaddle 3.2.1 已修复 PIR+oneDNN bug，默认开启加速
+TABLE_STRUCTURE_ENABLED = to_bool(args.table_structure)
 
 # ── 引擎后端（ONNX Runtime）────────────────────────────────────────
 # onnxruntime / onnxruntime-gpu 都走 ONNX Runtime 后端；
@@ -813,6 +821,127 @@ def run_ocr_safe(ocr, img):
     return result
 
 
+_TABLE_PIPELINE = None
+_GEOMETRY_BUILDER = None
+
+
+def _table_pipeline_kwargs():
+    if IS_ONNX:
+        return {"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
+    return {"engine": "paddle"}
+
+
+def _get_table_pipeline():
+    """首次 task=table 时才加载可选模型，默认 OCR 启动零额外开销。"""
+    global _TABLE_PIPELINE
+    if _TABLE_PIPELINE is None:
+        from paddleocr import TableRecognitionPipelineV2
+
+        _TABLE_PIPELINE = TableRecognitionPipelineV2(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_layout_detection=False,
+            # 复用本进程已经完成的 PP-OCRv6；避免官方表管线再加载一套
+            # PP-OCRv4（其 server_det 当前没有 ONNX 官方包）。
+            use_ocr_model=False,
+            **_table_pipeline_kwargs(),
+        )
+    return _TABLE_PIPELINE
+
+
+def _read_image_array(img):
+    if isinstance(img, np.ndarray):
+        return img
+    arr = cv2.imdecode(np.fromfile(img, dtype=np.uint8), cv2.IMREAD_COLOR)
+    if arr is None:
+        raise RuntimeError(f"table image read failed: {img}")
+    return arr
+
+
+def _overall_ocr_result(img, blocks):
+    """Umi textBlocks → PaddleX table pipeline 的 overall_ocr_res。"""
+    polys = []
+    boxes = []
+    texts = []
+    scores = []
+    for block in blocks or []:
+        poly = block.get("box") or []
+        if len(poly) != 4:
+            continue
+        points = [[int(round(p[0])), int(round(p[1]))] for p in poly]
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        polys.append(points)
+        boxes.append([min(xs), min(ys), max(xs), max(ys)])
+        texts.append(str(block.get("text") or ""))
+        scores.append(float(block.get("score") or 0.0))
+    image_array = _read_image_array(img)
+    poly_array = np.asarray(polys, dtype=np.int32)
+    return {
+        "input_path": img if isinstance(img, str) else None,
+        "page_index": None,
+        "doc_preprocessor_res": {"output_img": image_array},
+        "dt_polys": poly_array,
+        "rec_polys": poly_array.copy(),
+        "rec_boxes": np.asarray(boxes, dtype=np.int32),
+        "rec_texts": texts,
+        "rec_scores": scores,
+    }
+
+
+def run_table_structure(img, ocr_blocks):
+    """运行 PaddleOCR 表结构模型并返回通用 table；stdout 始终保持 JSON-only。"""
+    saved_fd = os.dup(1)
+    sys.stdout.flush()
+    os.dup2(2, 1)
+    try:
+        pipeline = _get_table_pipeline()
+        output = list(
+            pipeline.predict(
+                input=img,
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+                use_layout_detection=False,
+                use_ocr_model=False,
+                overall_ocr_res=_overall_ocr_result(img, ocr_blocks),
+                use_table_orientation_classify=False,
+            )
+        )
+    finally:
+        os.dup2(saved_fd, 1)
+        os.close(saved_fd)
+    table = structure_output_to_table(output)
+    if not table:
+        raise RuntimeError("table structure pipeline returned no table")
+    return table
+
+
+def _get_geometry_builder():
+    """复用宿主 P0 纯函数；按文件加载，避免触发 Umi 包级初始化。"""
+    global _GEOMETRY_BUILDER
+    if _GEOMETRY_BUILDER is not None:
+        return _GEOMETRY_BUILDER
+    path = os.path.abspath(
+        os.path.join(
+            os.path.dirname(__file__),
+            "..",
+            "..",
+            "py_src",
+            "ocr",
+            "tbpu",
+            "parser_tools",
+            "table_grid.py",
+        )
+    )
+    spec = importlib.util.spec_from_file_location("umi_table_grid_fallback", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"cannot load geometry fallback: {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _GEOMETRY_BUILDER = module.build_table
+    return _GEOMETRY_BUILDER
+
+
 def main():
     t_init = time.time()
     ocr, ver = build_ocr()
@@ -843,6 +972,7 @@ def main():
             req = json.loads(line)
         except Exception:
             continue
+        task = req.get("task") or "ocr"
 
         req_count += 1
         t0 = time.time()
@@ -905,6 +1035,36 @@ def main():
                                 _d["box"] = inv_fn(_d["box"])
                             except Exception as _e:
                                 sys.stderr.write(f"[preproc][WARN] 框逆映射失败跳过：{_e}\n")
+                    if task == "table" and TABLE_STRUCTURE_ENABLED:
+                        structure_table = None
+                        structure_error = ""
+                        try:
+                            structure_table = run_table_structure(
+                                img, out.get("data") or []
+                            )
+                        except Exception as table_exc:
+                            structure_error = (
+                                f"{type(table_exc).__name__}: {table_exc}"
+                            )
+                            sys.stderr.write(
+                                "[table][WARN] 结构模型失败，回退几何网格："
+                                f"{structure_error}\n"
+                            )
+                        geometry_builder = None
+                        if structure_table is None:
+                            try:
+                                geometry_builder = _get_geometry_builder()
+                            except Exception as geometry_exc:
+                                structure_error += (
+                                    " | geometry loader "
+                                    f"{type(geometry_exc).__name__}: {geometry_exc}"
+                                )
+                        out = attach_table_result(
+                            out,
+                            structure_table,
+                            geometry_builder=geometry_builder,
+                            structure_error=structure_error,
+                        )
                 finally:
                     # 仅清理 V6 补丁产生的临时文件
                     if tmp_padded and tmp_padded != img and os.path.exists(tmp_padded):
@@ -924,6 +1084,7 @@ def main():
         sys.stderr.write(
             f"[engine] #{req_count} {dt:.2f}s rss={rss}MB "
             f"backend={ENGINE_LABEL} ver={ver} conf={_avg_conf:.2f} "
+            f"task={task} table={out.get('table', {}).get('source', '-')} "
             f"out_code={out.get('code')} n_text={len(_scores)}\n"
         )
 

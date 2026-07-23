@@ -16,6 +16,7 @@ from .mission_ocr import MissionOCR
 from ..ocr.tbpu import getParser
 from ..ocr.tbpu import IgnoreArea
 from ..ocr.tbpu.parser_tools.paragraph_parse import word_separator  # 上下句间隔符
+from ..ocr.output.tools import promote_table_on_res
 
 MinSize = 1080  # 最小渲染分辨率
 # 单页嵌套 OCR 最长等待（秒）。超时后 stop OCR + 本页记错并继续，避免 DOC 工人永久卡死。
@@ -427,6 +428,9 @@ class _MissionDocClass(Mission):
             resDict = {"code": 102, "data": errMsg}
         else:  # 无文本，无异常
             resDict = {"code": 101, "data": ""}
+
+        # 表格网格等：提升 last_table / _table → res["table"]（ADR D4）
+        resDict = promote_table_on_res(resDict, msnInfo.get("tbpu"))
 
         # ===== 仅提取文本时任务速度过快，频繁回调会导致UI卡死，因此故意引入延迟 =====
         currentTime = time.time()

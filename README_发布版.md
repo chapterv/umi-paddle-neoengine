@@ -1,22 +1,43 @@
 # Local-Ocr · Umi-OCR 新引擎（PP-OCRv6）发布包
 
-**当前版本：1.1**（与源码仓 `VERSION` / 标签 `v1.1` 对齐）
+**当前版本：1.2**（与源码仓 `VERSION` 对齐）
 
 把 Umi-OCR v2.1.5 内置的 PP-OCRv3 引擎，升级为官方最新 **PaddleOCR 3.x** 路线
 （推荐 **PP-OCRv6 medium** + **ONNX Runtime**，可在设置里切 v5/v4 与 Paddle/MKLDNN）。
 
-> **v1.1**：批量文档空白页崩溃与「停止后无法再启」已修；发布包更名为下方两个 zip。  
+> **v1.2**：新增 P0 几何表格 CSV、P1 可选结构模型，以及 setup/升级安装入口。
 > 锁定 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 在 Windows/CPU 下易崩，勿擅自升级）。  
 > 公开源码：<https://github.com/chapterv/umi-paddle-neoengine>
 
 ---
 
-## 版本修订记录
+## 更新日志
 
-| 版本 / 阶段 | 说明 |
-|-------------|------|
-| **1.1（当前）** | 批量文档：空白页 `median([])` 防护；Mission `forceRecover`；stop 杀引擎可再启；单页 OCR 超时。发布包仅 `deploy` + `ONNX-V6-CPU`（目录 `umi-paddle-neoengine-release/`）。完整包已内嵌宿主修复；仅插件场景用源码仓 `patches/umi-host/apply_host_patches.bat` |
-| **1.0 及更早** | 默认 **ONNX Runtime CPU**；可选 ONNX CUDA GPU、Paddle+MKLDNN；`setup.bat`、中文路径、模型自包含 `paddlex/` 等 |
+### v1.2（2026-07-23）
+
+- **P0 几何表格**
+  - 新增 `表格-几何网格` 排版解析和 `table.csv 结构表格(Excel)` 输出。
+  - 结构 CSV 会在普通排版前直接使用原始 OCR 坐标建表，避免坐标丢失后猜列。
+  - 输出 UTF-8 BOM CSV，可用 Excel 直接打开。
+- **P1 可选结构模型**
+  - 接入 PaddleOCR `TableRecognitionPipelineV2`，复用当前 PP-OCRv6 识别结果。
+  - 支持 rowspan/colspan 合并表头；模型失败自动回退 P0。
+  - 默认关闭；额外依赖和约 955 MB 模型仅在用户选择时安装。
+- **安装与升级**
+  - `setup.bat` 新增第 4 步 P1 选择，直接回车默认 `N`。
+  - 新增 `install_table_models.bat`，自动选择与 `run.cmd` 相同的
+    `.venv_gpu → .venv` 环境，可用于老版本补装。
+
+### v1.1
+
+- 批量文档空白页 `median([])` 防护。
+- Mission `forceRecover`、stop 杀引擎可再启、单页 OCR 超时。
+- 发布包统一为 `deploy` + `ONNX-V6-CPU`，并提供宿主补丁安装器。
+
+### v1.0 及更早
+
+- 默认 ONNX Runtime CPU；可选 ONNX CUDA GPU、Paddle+MKLDNN。
+- 完成 `setup.bat`、中文路径和插件内 `paddlex/` 模型缓存加固。
 
 **宿主补丁（可选）**：zip 解压即用无需 patch。官方 Umi + 只拷插件时：
 
@@ -39,7 +60,7 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 
 ---
 
-## 当前发布包（v1.1）
+## 当前发布包（v1.2）
 
 输出目录：同级 **`umi-paddle-neoengine-release/`**
 
@@ -71,17 +92,29 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 ## 简洁版 用法（两个引擎版通用）
 
 1. 解压 `Local-Ocr_xxx_简洁版.zip`
-2. 双击根目录 **`setup.bat`**（两段式）
+2. 双击根目录 **`setup.bat`**
    - 第 1 步：选模型范围（完整 / 最小可用 / 多语言）
    - 第 2 步：选推理后端 —— `[1]` 纯 GPU（onnxruntime-gpu）/ `[2]` 纯 CPU（默认）/ `[3]` 全安装
    - 选 GPU 时第 3 步：选 CUDA 版本 —— `[1]` 1.27.0 + CUDA13 / `[2]` 1.26.0 + CUDA12.9（默认，RTX 30/40 系）
    - 自动建 `.venv_gpu` 虚拟环境并 `pip install paddlepaddle==3.2.1 paddleocr==3.7.0 onnxruntime-gpu[cuda,cudnn]==1.26.0`
    - 自动预下载所选模型（约 1 分钟，需联网）
+   - 第 4 步询问是否安装 **P1 表格结构模型**；直接回车默认 `N`
+   - 输入 `Y` 会安装可选依赖并预下载约 **955 MB** 的表格模型
    - 全程约 2~3 分钟
    - ⚠️ 选中 GPU 但本机 CUDA 不可用，引擎会明确标 `[⚠回退CPU]` 并打 WARN，功能仍正常（仅无 GPU 提速）
 3. 双击 `Umi-OCR\Umi-OCR.exe` 打开主程序
 4. 「全局设置 → 文字识别」里选 **PaddleOCR·PP-OCRv6/v4（新引擎）**
 5. 拖入图片开始识别（首次切到 v6 会自动下载 v6 模型，仅需一次）
+
+已有可用环境、不想重跑完整 setup：
+
+```bat
+install_table_models.bat
+```
+
+该入口会复用 `run.cmd` 的环境选择顺序，优先 `.venv_gpu`、再回退 `.venv`。
+`install_table_models.bat --check` 只检查，不安装；`--deps-only` 只装依赖，
+模型在首次开启 P1 时下载。
 
 > 前置：本机需有 **Python 3.10 或 3.11**（setup.bat 优先找 3.11）。
 > 没装的话先去 https://www.python.org 装一个并勾选 “Add to PATH”。
@@ -96,6 +129,57 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 4. 拖入图片即可，**无需联网、无需装任何东西**
 
 > 懒人版的 `.venv` 是 Windows 可移植虚拟环境，换机器解压即用。
+
+---
+
+## 表格识别与结构 CSV
+
+### P0 几何方式：无需安装额外模型
+
+适合边框清楚、行列较规整的表格，速度和普通 OCR 接近。
+
+1. 打开 **批量识图**或**批量文档**页面。
+2. 右侧切换到 **设置**。
+3. 展开 **保存文件类型**，勾选
+   **`table.csv 结构表格(Excel)`**。
+4. 直接开始任务即可。即使排版方案保持原选项，系统也会在普通排版前按
+   原始 OCR 坐标自动建立二维表。
+5. 如果还要让结果文本区以 TSV 表格形式预览，在
+   **OCR文本后处理 → 排版解析方案**选择
+   **`表格-几何网格`**。
+
+输出位置遵循页面中的 **保存到** 设置，文件名以 `_table.csv` 结尾。CSV 使用
+UTF-8 BOM，可直接双击用 Excel 打开。
+
+### P1 模型方式：复杂表与合并单元格
+
+首次使用前，通过 `setup.bat` 第 4 步输入 `Y`，或双击
+`install_table_models.bat`。安装完成后：
+
+1. **完全退出并重启 Umi-OCR**。
+2. 左侧进入 **全局设置**。
+3. 打开 **文字识别**，确认 **当前接口**为本项目的
+   PaddleOCR 本地新引擎。
+4. 找到开关 **`表格结构模型（P1·可选）`**并开启。
+5. 点击该组顶部的绿色按钮 **`应用修改`**；看到
+   “文字识别接口应用成功”才算生效。
+6. 回到批量识图/批量文档，仍然勾选
+   **`table.csv 结构表格(Excel)`**后开始任务。
+
+关闭 P1 开关并再次点击 **应用修改**，即可恢复纯 P0/普通 OCR；更改开关时
+若已有任务运行，需先等待任务结束或点击 **强制终止任务**。
+
+### P0 与 P1 的区别
+
+| 项目 | P0 几何方式 | P1 结构模型 |
+|------|-------------|-------------|
+| 安装 | 默认已有，无额外依赖 | 可选安装，约 955 MB 模型 |
+| 原理 | OCR 文本框坐标聚类成行列 | SLANeXt/单元格检测 + OCR 填格 |
+| 速度/内存 | 轻量，接近普通 OCR | 冷启动和内存明显更高 |
+| 规整有线表 | 推荐 | 可用 |
+| 无线表/复杂表 | 能力有限 | 通常更好 |
+| 合并单元格 | CSV 中只能展开/近似 | 保留 HTML rowspan/colspan，再展开到 CSV |
+| 失败处理 | 无模型失败点 | 自动回退 P0，普通 OCR 不报错 |
 
 ---
 
@@ -136,6 +220,7 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 ```
 Local-Ocr/
 ├─ setup.bat                      # 简洁版一键部署
+├─ install_table_models.bat       # P1 表结构模型可选安装/升级
 ├─ Umi-OCR/
 │  ├─ Umi-OCR.exe               # 主程序（官方 v2.1.5）
 │  └─ UmiOCR-data/
@@ -145,6 +230,9 @@ Local-Ocr/
 │           ├─ run.cmd              # 入口：调 .venv/python engine.py
 │           ├─ PPOCR_*.py          # Umi-OCR 插件契约
 │           ├─ requirements.txt     # paddlepaddle==3.2.1 / paddleocr==3.7.0 / onnxruntime-gpu[cuda,cudnn]==1.26.0（默认 CUDA 12.9）/ 1.27.0（CUDA 13）
+│           ├─ requirements-table.txt # P1 可选依赖（默认基础安装不装）
+│           ├─ table_structure.py    # P1 HTML/合并单元格 → 通用 table 协议
+│           ├─ download_table_models.py # P1 依赖检查与模型预下载
 │           ├─ models/configs.txt  # 语言下拉框配置（必须保留）
 │           ├─ .venv_gpu/        # [仅懒人版] Python 环境（GPU 用 onnxruntime-gpu）
 │           └─ paddlex/           # [仅懒人版] 官方模型缓存（真实权重）

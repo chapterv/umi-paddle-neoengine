@@ -1,8 +1,8 @@
 # win_x64_PaddleOCR_Py —— Umi-OCR 的 PaddleOCR（Python）引擎插件
 
 基于 **PaddleOCR 3.x（pipeline 架构，PP-OCRv6/v5）** 的本地 OCR 引擎，
-以 Umi-OCR 插件形式提供，与官方 `hiroi-sora/PaddleOCR-json` 管道协议完全兼容，
-**Umi-OCR 主程序零改动**。
+以 Umi-OCR 插件形式提供，与官方 `hiroi-sora/PaddleOCR-json` 管道协议兼容。
+普通 OCR 只需插件；P0 结构 CSV/表格排版还需要本项目发布包已内嵌的宿主补丁。
 
 > 路线：自写 Python 插件（Route B），引擎子进程直接调用官方 `paddleocr.PaddleOCR()`
 > 推理，复用 Umi-OCR 自带的 `PPOCR_umi` / `PPOCR_api` JSON 管道。
@@ -29,6 +29,9 @@
 | `PPOCR_config.py` / `i18n.csv` | 引擎设置面板（语言下拉框、方向分类、边长限制等） |
 | `models/configs.txt` + `config_*.txt` | **仅驱动语言下拉框**，引擎不读其内容；真实模型由 paddle 自动下载 |
 | `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` + `onnxruntime-gpu[cuda,cudnn]==1.26.0`（默认 CUDA 12.9）/ `1.27.0`（CUDA 13） |
+| `requirements-table.txt` | P1 表格结构模型可选依赖；默认基础安装不安装 |
+| `table_structure.py` | P1 HTML rowspan/colspan → Umi 通用二维 table 协议 |
+| `download_table_models.py` | P1 依赖检查和约 955 MB 表格模型预下载 |
 | `.venv/` | 隔离 Python 环境（含 paddle，已装；**不进 git**） |
 | `paddlex/` | **真实 OCR 模型权重目录**（PP-OCRv4 / v5 / v6 的检测+识别+方向分类模型） |
 
@@ -56,6 +59,18 @@
    懒人版已把模型预置到此目录；简洁版首次识别某语言时，paddle 会**自动下载并缓存**到这里
    （约几十~上百 MB，只需一次，无需手动搬运）。
 5. 拖入图片或粘贴截图即可识别。
+
+## 表格识别
+
+- **P0 几何方式**：无需额外模型。在批量识图/批量文档的 **设置 → 保存文件类型**
+  勾选 **`table.csv 结构表格(Excel)`**，系统会在普通排版前按原始 OCR 坐标
+  自动重建行列。需要结果区表格预览时，再将 **排版解析方案**设为
+  **`表格-几何网格`**。
+- **P1 模型方式**：先运行根目录 `install_table_models.bat`。重启 Umi 后进入
+  **全局设置 → 文字识别**，开启 **`表格结构模型（P1·可选）`**，点击
+  **`应用修改`**。P1 支持复杂有线/无线表和合并表头；失败自动回退 P0。
+- 两种方式都通过 **`table.csv 结构表格(Excel)`**输出 `_table.csv`。
+  P0 更轻；P1 额外占用约 955 MB 模型并增加冷启动和内存。
 
 ## 已知约束（务必阅读）
 - **MKLDNN 默认开启（已修复）**：paddle 3.3.x 的 oneDNN 在 Windows/CPU 下推理期崩溃

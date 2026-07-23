@@ -196,11 +196,13 @@ class PPOCR_pipe:  # 调用OCR（管道模式）
                 "data": f"识别器输出值反序列化JSON失败。异常信息：[{e}]。原始内容：[{getStr}]",
             }
 
-    def run(self, imgPath: str):
+    def run(self, imgPath: str, task=None):
         """对一张本地图片进行文字识别。\n
         `imgPath`: 图片路径。\n
         `return`:  {"code": 识别码, "data": 内容列表或错误信息字符串}\n"""
         writeDict = {"image_path": imgPath}
+        if task:
+            writeDict["task"] = task
         return self.runDict(writeDict)
 
     def runClipboard(self):
@@ -211,19 +213,21 @@ class PPOCR_pipe:  # 调用OCR（管道模式）
         else:
             raise Exception("剪贴板功能不存在或已禁用。")
 
-    def runBase64(self, imageBase64: str):
+    def runBase64(self, imageBase64: str, task=None):
         """对一张编码为base64字符串的图片进行文字识别。\n
         `imageBase64`: 图片base64字符串。\n
         `return`:  {"code": 识别码, "data": 内容列表或错误信息字符串}\n"""
         writeDict = {"image_base64": imageBase64}
+        if task:
+            writeDict["task"] = task
         return self.runDict(writeDict)
 
-    def runBytes(self, imageBytes):
+    def runBytes(self, imageBytes, task=None):
         """对一张图片的字节流信息进行文字识别。\n
         `imageBytes`: 图片字节流。\n
         `return`:  {"code": 识别码, "data": 内容列表或错误信息字符串}\n"""
         imageBase64 = b64encode(imageBytes).decode("utf-8")
-        return self.runBase64(imageBase64)
+        return self.runBase64(imageBase64, task=task)
 
     def exit(self):
         """关闭引擎子进程（增强版：关管道→优雅终止→强杀→tree-kill）。

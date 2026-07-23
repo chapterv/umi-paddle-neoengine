@@ -1,0 +1,7 @@
+# P1 表格结构模型的可选依赖；默认 requirements.txt 不安装本组。
+# 安装到插件现有虚拟环境：
+#   python -m pip install -r requirements-table.txt
+#
+# 首次启用会按 PaddleX 机制下载表分类、SLANeXt wired/wireless 和
+# RT-DETR 单元格检测模型；2026-07-23 实测缓存约 955 MB。
+paddlex[ocr]==3.7.2

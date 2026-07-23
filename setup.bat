@@ -9,7 +9,7 @@ set "PY=%VENV%\Scripts\python.exe"
 set "CHOICE_FILE=%TEMP%\local_ocr_choice.txt"
 
 echo ============================================================
-echo  Local-Ocr 新引擎部署（两步：模型范围 -^> 推理后端）
+echo  Local-Ocr 新引擎部署（基础 OCR + 可选 P1 表格模型）
 echo ============================================================
 
 REM --- 1) 准备 Python（优先用 uv 自动下载 3.12，venv 内自带解释器）---
@@ -311,12 +311,33 @@ echo        预下载模型（范围选项 %CHOICE%）...
 "%PY%" "%~dp0deploy.py" --choice %CHOICE%
 if errorlevel 1 ( echo [WARN] 模型预下载异常，首次识别会自动下载。 )
 
+REM --- 5) 第4步：P1 表格结构模型（可选，默认不安装）---
+echo.
+echo 第4步：可选表格结构模型
+echo   P0 几何表格无需额外模型；P1 支持合并单元格和复杂表结构。
+echo   P1 将额外安装依赖并下载约 955 MB 模型，默认不安装。
+set /p TABLE_INSTALL=是否安装 P1 表格结构模型？请输入 Y/N（直接回车 = N）：
+if /I "!TABLE_INSTALL!"=="Y" (
+  set "TABLE_PY=%PY%"
+  call "%~dp0install_table_models.bat" --from-setup
+  set "TABLE_INSTALL_RC=!ERRORLEVEL!"
+  set "TABLE_PY="
+  if not "!TABLE_INSTALL_RC!"=="0" (
+    echo [ERROR] P1 表格结构模型安装失败，普通 OCR 与 P0 几何表格仍可使用。
+    pause
+    exit /b !TABLE_INSTALL_RC!
+  )
+) else (
+  echo        已跳过 P1。以后可双击 install_table_models.bat 单独补装。
+)
+
 echo.
 echo ============================================================
 echo  部署完成。现在可以：
 echo   1. 双击 Umi-OCR\Umi-OCR.exe 打开主程序
 echo   2. 在「全局设置 - 文字识别」选择 PaddleOCR（本地·PP-OCRv6/v5/v4）
 echo   3. 拖入图片开始 - 首次会自动用对应引擎
+echo   4. 若安装了 P1，可在插件设置开启「表格结构模型（P1·可选）」
 echo ============================================================
 pause
 goto :eof
