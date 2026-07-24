@@ -203,14 +203,26 @@ if not exist "%VENV%\Scripts\python.exe" (
 )
 for /f "delims=" %%V in ('"%VENV%\Scripts\python.exe" -c "import sys; print(sys.version.split()[0])" 2^>nul') do echo       venv python = %%V
 
-REM pip 国内镜像（更快 + 避免国际 TLS 中断）；覆盖：set PIP_INDEX=https://pypi.org/simple
+REM pip：清华主源 → 中科大国内备用 → PyPI 官方最后备用。
+REM 可覆盖：set PIP_INDEX=https://... ；set PIP_FALLBACK=https://...
 if not defined PIP_INDEX set "PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+if not defined PIP_FALLBACK set "PIP_FALLBACK=https://mirrors.ustc.edu.cn/pypi/simple"
 set "PIP_EXTRA=--index-url %PIP_INDEX% --trusted-host pypi.tuna.tsinghua.edu.cn --retries 10 --timeout 60"
+set "PIP_FALLBACK_EXTRA=--index-url %PIP_FALLBACK% --trusted-host mirrors.ustc.edu.cn --retries 10 --timeout 90"
+set "PIP_OFFICIAL_EXTRA=--index-url https://pypi.org/simple --retries 10 --timeout 120"
 
 "%PY%" -m pip install --quiet --upgrade pip %PIP_EXTRA%
 if errorlevel 1 ( echo [WARN] pip 自升级失败，继续。 )
 echo        安装 paddlepaddle + paddleocr ...
 "%PY%" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_EXTRA%
+if errorlevel 1 (
+  echo [WARN] 清华镜像安装核心依赖失败，改用中科大镜像重试...
+  "%PY%" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_FALLBACK_EXTRA%
+)
+if errorlevel 1 (
+  echo [WARN] 中科大镜像安装核心依赖失败，改用 PyPI 官方源重试...
+  "%PY%" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_OFFICIAL_EXTRA%
+)
 if errorlevel 1 (
   echo [ERROR] paddlepaddle/paddleocr 安装失败，检查网络/代理后重试。
   pause
@@ -219,14 +231,19 @@ if errorlevel 1 (
 echo        安装推理后端 %SPEC% ...
 "%PY%" -m pip install "%SPEC%" %PIP_EXTRA%
 if errorlevel 1 (
-  echo [WARN] 镜像 %PIP_INDEX% 未同步 %SPEC%，自动改用官方源重试（可能较慢）...
-  "%PY%" -m pip install "%SPEC%" --index-url https://pypi.org/simple --retries 10 --timeout 120
+  echo [WARN] 镜像 %PIP_INDEX% 未同步 %SPEC%，改用中科大镜像重试...
+  "%PY%" -m pip install "%SPEC%" %PIP_FALLBACK_EXTRA%
+)
+if errorlevel 1 (
+  echo [WARN] 中科大镜像未同步 %SPEC%，自动改用官方源重试（可能较慢）...
+  "%PY%" -m pip install "%SPEC%" %PIP_OFFICIAL_EXTRA%
 )
 if errorlevel 1 (
   REM 带 [cuda,cudnn] 失败时：改装同版本本体（cu13 extras 在 PyPI 无正式包时必走此路）
   if defined SPEC_BASE if /I not "%SPEC%"=="%SPEC_BASE%" (
     echo [WARN] 带 CUDA extras 的安装失败，改装不带 extras 的本体 %SPEC_BASE% ...
-    "%PY%" -m pip install "%SPEC_BASE%" --index-url https://pypi.org/simple --retries 10 --timeout 120
+    "%PY%" -m pip install "%SPEC_BASE%" %PIP_FALLBACK_EXTRA%
+    if errorlevel 1 "%PY%" -m pip install "%SPEC_BASE%" %PIP_OFFICIAL_EXTRA%
     if not errorlevel 1 (
       echo [WARN] 已装上 %SPEC_BASE%（无 pip 自带 CUDA DLL）。
       echo        · 推荐：重跑 setup，第3步选 [2] 1.26.0[cuda,cudnn]（cu12 可一键装齐）
@@ -250,7 +267,8 @@ if errorlevel 1 (
 REM CUDA13 目标：本体已装时，额外尝试 [cuda,cudnn]；失败不阻断（PyPI 常无 cu13）
 if "%GPU_WANT_CUDA13%"=="1" (
   echo        尝试为 1.27 安装 CUDA13 extras: onnxruntime-gpu[cuda,cudnn]==1.27.0 ...
-  "%PY%" -m pip install "onnxruntime-gpu[cuda,cudnn]==1.27.0" --index-url https://pypi.org/simple --retries 5 --timeout 90
+  "%PY%" -m pip install "onnxruntime-gpu[cuda,cudnn]==1.27.0" %PIP_FALLBACK_EXTRA%
+  if errorlevel 1 "%PY%" -m pip install "onnxruntime-gpu[cuda,cudnn]==1.27.0" %PIP_OFFICIAL_EXTRA%
   if errorlevel 1 (
     echo [WARN] CUDA13 extras 不可用（预期现象：nvidia-*-cu13 在 PyPI 只有占位 0.0.1）。
     echo        已保留 onnxruntime-gpu==1.27.0 本体 → import 正常；GUI 的 onnxruntime 引擎可用。
@@ -288,13 +306,18 @@ if "%FULL_INSTALL%"=="1" (
   if exist "!PY_CPU!" (
     "!PY_CPU!" -m pip install --quiet --upgrade pip %PIP_EXTRA%
     "!PY_CPU!" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_EXTRA%
+    if errorlevel 1 "!PY_CPU!" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_FALLBACK_EXTRA%
+    if errorlevel 1 "!PY_CPU!" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_OFFICIAL_EXTRA%
     if "%PYVER%"=="310" (
       "!PY_CPU!" -m pip install "onnxruntime==1.23.2" %PIP_EXTRA%
     ) else (
       "!PY_CPU!" -m pip install "onnxruntime==1.26.0" %PIP_EXTRA%
     )
     if errorlevel 1 (
-      "!PY_CPU!" -m pip install "onnxruntime==1.26.0" --index-url https://pypi.org/simple --retries 10 --timeout 120
+      "!PY_CPU!" -m pip install "onnxruntime==1.26.0" %PIP_FALLBACK_EXTRA%
+    )
+    if errorlevel 1 (
+      "!PY_CPU!" -m pip install "onnxruntime==1.26.0" %PIP_OFFICIAL_EXTRA%
     )
     "!PY_CPU!" -c "import onnxruntime as o; print('[全安装] CPU ort', o.__version__)"
     if errorlevel 1 (

@@ -123,9 +123,12 @@ if _PADDLEX_HOME != os.path.join(_HERE, "paddlex"):
     except Exception:
         pass
 
+from model_sources import configure_domestic_model_sources
 from paddleocr import PaddleOCR
 from table_structure import attach_table_result, structure_output_to_table
 from punctuation_recovery import recover_vertical_full_stops
+
+configure_domestic_model_sources()
 
 PUNCTUATION_RECOVERY_ENABLED = str(
     os.environ.get("UMI_OCR_VERTICAL_PUNCTUATION_RECOVERY", "1")

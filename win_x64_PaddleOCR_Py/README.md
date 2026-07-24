@@ -50,6 +50,13 @@
 - ⚠️ 根目录那个 `paddlex/`（约 171M）是早期遗留的**废弃缓存**，发布包已排除；
   真正随包的是插件目录内的 `paddlex/`（约 549M）。
 
+## 首次下载的网络来源
+
+- 缺失模型的下载顺序固定为：**ModelScope → 百度 AI Studio → 百度 BOS → Hugging Face**。
+  国内三站是主力，Hugging Face 只作为最后备用；已存在于 `paddlex/` 的模型不会联网。
+- 依赖安装顺序为：**清华 PyPI 镜像 → 中科大 PyPI 镜像 → 官方 PyPI**。可在运行
+  `setup.bat` 或 `install_table_models.bat` 前用 `PIP_INDEX`、`PIP_FALLBACK` 覆盖前两个源。
+
 ## 使用方法（Umi-OCR GUI）
 1. 用 **Umi-OCR v2.1.5**（或兼容版本）打开本项目 `Umi-OCR/` 目录的程序。
 2. 全局设置 → 「引擎」下拉框，选择本插件（名为 **PaddleOCR（本地）** / 对应 `win_x64_PaddleOCR_Py`）。

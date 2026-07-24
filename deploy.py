@@ -6,6 +6,8 @@ PLUGIN = os.path.join(ROOT, "Umi-OCR", "UmiOCR-data", "plugins", "win_x64_Paddle
 PY = os.path.join(PLUGIN, ".venv_gpu", "Scripts", "python.exe")
 CACHE = os.path.join(PLUGIN, "paddlex")
 os.environ["PADDLE_PDX_CACHE_HOME"] = CACHE
+if PLUGIN not in sys.path:
+    sys.path.insert(0, PLUGIN)
 
 SELF_TEST = "--selftest" in sys.argv
 
@@ -58,7 +60,9 @@ def download(ver, lang, engine, with_tools):
         log("  [OK-selftest] %s/%s/%s 跳过真实下载" % (ver, lang, tag))
         return
     try:
+        from model_sources import configure_domestic_model_sources
         import paddleocr
+        configure_domestic_model_sources()
         kwargs = dict(
             device="cpu", lang=lang, ocr_version=ver,
             # 工具模型默认关（textline）/开（doc_*）；下工具时统一强制全开，

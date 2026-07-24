@@ -73,12 +73,19 @@ if /I "%MODE%"=="check" (
 )
 
 if not defined PIP_INDEX set "PIP_INDEX=https://pypi.tuna.tsinghua.edu.cn/simple"
+if not defined PIP_FALLBACK set "PIP_FALLBACK=https://mirrors.ustc.edu.cn/pypi/simple"
 set "PIP_EXTRA=--index-url %PIP_INDEX% --trusted-host pypi.tuna.tsinghua.edu.cn --retries 10 --timeout 120"
+set "PIP_FALLBACK_EXTRA=--index-url %PIP_FALLBACK% --trusted-host mirrors.ustc.edu.cn --retries 10 --timeout 150"
+set "PIP_OFFICIAL_EXTRA=--index-url https://pypi.org/simple --retries 10 --timeout 180"
 echo [3] 安装 P1 可选依赖...
 "%PY%" -m pip install -r "%PLUGIN%\requirements-table.txt" %PIP_EXTRA%
 if errorlevel 1 (
-  echo [WARN] 镜像安装失败，切换到 PyPI 官方源重试...
-  "%PY%" -m pip install -r "%PLUGIN%\requirements-table.txt" --index-url https://pypi.org/simple --retries 10 --timeout 180
+  echo [WARN] 清华镜像安装失败，切换到中科大镜像重试...
+  "%PY%" -m pip install -r "%PLUGIN%\requirements-table.txt" %PIP_FALLBACK_EXTRA%
+)
+if errorlevel 1 (
+  echo [WARN] 中科大镜像安装失败，切换到 PyPI 官方源重试...
+  "%PY%" -m pip install -r "%PLUGIN%\requirements-table.txt" %PIP_OFFICIAL_EXTRA%
 )
 if errorlevel 1 (
   echo [ERROR] P1 可选依赖安装失败。

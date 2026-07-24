@@ -12,6 +12,8 @@ HERE = Path(__file__).resolve().parent
 CACHE = HERE / "paddlex"
 os.environ.setdefault("PADDLE_PDX_CACHE_HOME", str(CACHE))
 
+from model_sources import configure_domestic_model_sources
+
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 if hasattr(sys.stderr, "reconfigure"):
@@ -26,6 +28,8 @@ def dependency_status() -> dict:
     import scipy
     import sklearn
     from paddleocr import TableRecognitionPipelineV2
+
+    configure_domestic_model_sources()
 
     del TableRecognitionPipelineV2
     return {
@@ -56,6 +60,8 @@ def engine_kwargs() -> dict:
 
 def download_models() -> dict:
     from paddleocr import TableRecognitionPipelineV2
+
+    configure_domestic_model_sources()
 
     kwargs = engine_kwargs()
     TableRecognitionPipelineV2(
