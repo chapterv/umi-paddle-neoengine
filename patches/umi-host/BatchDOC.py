@@ -10,6 +10,7 @@ from .page import Page  # 页基类
 from ..mission.mission_doc import MissionDOC  # 任务管理器
 from ..utils import utils
 from ..ocr.output import Output
+from ..ocr.output.tools import resolve_table_request_task, resolve_trace_capture_path
 
 
 class BatchDOC(Page):
@@ -43,6 +44,9 @@ class BatchDOC(Page):
                 if k.startswith(prefix):
                     docArgd[k] = v
                     break
+        # The table model is a per-request choice, not a global engine mode.
+        docArgd["request_task"] = resolve_table_request_task(argd)
+        docArgd["trace_capture_path"] = resolve_trace_capture_path(argd)
 
         # 记录任务参数
         self._queuedDocs = docs
@@ -135,6 +139,7 @@ class BatchDOC(Page):
             "pdfOneLayerDirection": argd.get(
                 "mission.filesType.pdfOneLayerDirection", "auto"
             ),
+            "traceCapturePath": resolve_trace_capture_path(argd),
         }
 
         # =============== 实例化输出器对象 ===============

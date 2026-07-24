@@ -17,6 +17,7 @@ if not exist "%PATCH_DIR%mission.py" set "MISS=1"
 if not exist "%PATCH_DIR%mission_doc.py" set "MISS=1"
 if not exist "%PATCH_DIR%mission_ocr.py" set "MISS=1"
 if not exist "%PATCH_DIR%BatchDOC.py" set "MISS=1"
+if not exist "%PATCH_DIR%BatchOCR.py" set "MISS=1"
 if not exist "%PATCH_DIR%line_preprocessing.py" set "MISS=1"
 if not exist "%PATCH_DIR%output_init.py" set "MISS=1"
 if not exist "%PATCH_DIR%output_table_csv.py" set "MISS=1"
@@ -32,6 +33,11 @@ if not exist "%PATCH_DIR%Configs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%BatchDOCConfigs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%BatchOCRConfigs.qml" set "MISS=1"
 if not exist "%PATCH_DIR%ResultsTableView.qml" set "MISS=1"
+if not exist "%PATCH_DIR%PPOCR_umi.py" set "MISS=1"
+if not exist "%PATCH_DIR%PPOCR_config.py" set "MISS=1"
+if not exist "%PATCH_DIR%engine.py" set "MISS=1"
+if not exist "%PATCH_DIR%table_structure.py" set "MISS=1"
+if not exist "%PATCH_DIR%punctuation_recovery.py" set "MISS=1"
 if "!MISS!"=="1" (
   echo [ERROR] Missing host patch files in this folder.
   goto FAIL
@@ -99,11 +105,13 @@ mkdir "%BAK%\qt_res\qml\Configs" 2>nul
 mkdir "%BAK%\qt_res\qml\TabPages\BatchDOC" 2>nul
 mkdir "%BAK%\qt_res\qml\TabPages\BatchOCR" 2>nul
 mkdir "%BAK%\qt_res\qml\Widgets\ResultLayout" 2>nul
+mkdir "%BAK%\plugins\win_x64_PaddleOCR_Py" 2>nul
 echo [backup] %BAK%
 copy /Y "%PY_SRC%\mission\mission.py" "%BAK%\mission\" >nul 2>&1
 copy /Y "%PY_SRC%\mission\mission_doc.py" "%BAK%\mission\" >nul 2>&1
 copy /Y "%PY_SRC%\mission\mission_ocr.py" "%BAK%\mission\" >nul 2>&1
 copy /Y "%PY_SRC%\tag_pages\BatchDOC.py" "%BAK%\tag_pages\" >nul 2>&1
+copy /Y "%PY_SRC%\tag_pages\BatchOCR.py" "%BAK%\tag_pages\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\tbpu\parser_tools\line_preprocessing.py" "%BAK%\parser_tools\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\output\__init__.py" "%BAK%\ocr\output\" >nul 2>&1
 copy /Y "%PY_SRC%\ocr\output\output_table_csv.py" "%BAK%\ocr\output\" >nul 2>&1
@@ -119,6 +127,11 @@ copy /Y "%DATA_ROOT%\qt_res\qml\Configs\Configs.qml" "%BAK%\qt_res\qml\Configs\"
 copy /Y "%DATA_ROOT%\qt_res\qml\TabPages\BatchDOC\BatchDOCConfigs.qml" "%BAK%\qt_res\qml\TabPages\BatchDOC\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\TabPages\BatchOCR\BatchOCRConfigs.qml" "%BAK%\qt_res\qml\TabPages\BatchOCR\" >nul 2>&1
 copy /Y "%DATA_ROOT%\qt_res\qml\Widgets\ResultLayout\ResultsTableView.qml" "%BAK%\qt_res\qml\Widgets\ResultLayout\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_umi.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_config.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\engine.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\table_structure.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\punctuation_recovery.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 
 REM ---- apply ----
 echo [apply] writing patches...
@@ -129,6 +142,8 @@ if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%mission_ocr.py" "%PY_SRC%\mission\mission_ocr.py" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%BatchDOC.py" "%PY_SRC%\tag_pages\BatchDOC.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%BatchOCR.py" "%PY_SRC%\tag_pages\BatchOCR.py" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%line_preprocessing.py" "%PY_SRC%\ocr\tbpu\parser_tools\line_preprocessing.py" >nul
 if errorlevel 1 goto COPYFAIL
@@ -160,6 +175,16 @@ copy /Y "%PATCH_DIR%BatchOCRConfigs.qml" "%DATA_ROOT%\qt_res\qml\TabPages\BatchO
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%ResultsTableView.qml" "%DATA_ROOT%\qt_res\qml\Widgets\ResultLayout\ResultsTableView.qml" >nul
 if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%PPOCR_umi.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_umi.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%PPOCR_config.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_config.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%engine.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\engine.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%table_structure.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\table_structure.py" >nul
+if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%punctuation_recovery.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\punctuation_recovery.py" >nul
+if errorlevel 1 goto COPYFAIL
 
 if exist "%PY_SRC%\mission\__pycache__" rd /s /q "%PY_SRC%\mission\__pycache__" 2>nul
 if exist "%PY_SRC%\tag_pages\__pycache__" rd /s /q "%PY_SRC%\tag_pages\__pycache__" 2>nul
@@ -169,7 +194,7 @@ if exist "%PY_SRC%\ocr\tbpu\parser_tools\__pycache__" rd /s /q "%PY_SRC%\ocr\tbp
 
 echo.
 echo === DONE ===
-echo 19 host patches applied. Restart Umi-OCR.
+echo 25 host/plugin patches applied. Restart Umi-OCR.
 echo Rollback from: %BAK%
 echo.
 pause

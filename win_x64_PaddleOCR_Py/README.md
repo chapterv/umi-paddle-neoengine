@@ -31,6 +31,7 @@
 | `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` + `onnxruntime-gpu[cuda,cudnn]==1.26.0`（默认 CUDA 12.9）/ `1.27.0`（CUDA 13） |
 | `requirements-table.txt` | P1 表格结构模型可选依赖；默认基础安装不安装 |
 | `table_structure.py` | P1 HTML rowspan/colspan → Umi 通用二维 table 协议 |
+| `punctuation_recovery.py` | 竖排 `。` 的保守图像连通域恢复；只接受唯一高置信候选 |
 | `download_table_models.py` | P1 依赖检查和约 955 MB 表格模型预下载 |
 | `.venv/` | 隔离 Python 环境（含 paddle，已装；**不进 git**） |
 | `paddlex/` | **真实 OCR 模型权重目录**（PP-OCRv4 / v5 / v6 的检测+识别+方向分类模型） |
@@ -69,8 +70,18 @@
 - **P1 模型方式**：先运行根目录 `install_table_models.bat`。重启 Umi 后进入
   **全局设置 → 文字识别**，开启 **`表格结构模型（P1·可选）`**，点击
   **`应用修改`**。P1 支持复杂有线/无线表和合并表头；失败自动回退 P0。
+- 开启 P1 只是允许使用表格能力；只有当前批次明确勾选 `table.csv` 才发送
+  `task=table`。普通截图、预览和文档 OCR 固定使用 `task=ocr`，不会加载 P1。
 - 两种方式都通过 **`table.csv 结构表格(Excel)`**输出 `_table.csv`。
   P0 更轻；P1 额外占用约 955 MB 模型并增加冷启动和内存。
+
+## 竖排句号与调试追踪
+
+- 引擎只在竖排栏原图中找到唯一高置信环形连通域，且尺寸、位置、视觉 cell、
+  低墨量均可信时恢复 `。`；不会根据换行或语义猜标点。
+- 紧急关闭：启动前设置 `UMI_OCR_VERTICAL_PUNCTUATION_RECOVERY=0`。
+- 设置中的 **OCR 调试追踪 JSONL（可选）** 默认留空；填写路径后，批量文档会以
+  同一 request ID 记录 `raw_ocr`、`preview`、`document_export` 三阶段证据。
 
 ## 已知约束（务必阅读）
 - **MKLDNN 默认开启（已修复）**：paddle 3.3.x 的 oneDNN 在 Windows/CPU 下推理期崩溃

@@ -20,7 +20,7 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 
 脚本会：
 
-1. 校验 19 个补丁文件齐全
+1. 校验 25 个宿主/插件补丁文件齐全
 2. 解析 `Umi-OCR` / `UmiOCR-data` / `py_src` 路径  
 3. 备份原文件到 `py_src\_patch_backup_时间戳\`  
 4. 覆盖写入并清理相关 `__pycache__`  
@@ -35,6 +35,7 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 | mission_doc.py | `UmiOCR-data/py_src/mission/mission_doc.py` |
 | mission_ocr.py | `UmiOCR-data/py_src/mission/mission_ocr.py` |
 | BatchDOC.py | `UmiOCR-data/py_src/tag_pages/BatchDOC.py` |
+| BatchOCR.py | `UmiOCR-data/py_src/tag_pages/BatchOCR.py` |
 | line_preprocessing.py | `UmiOCR-data/py_src/ocr/tbpu/parser_tools/line_preprocessing.py` |
 | output_init.py | `UmiOCR-data/py_src/ocr/output/__init__.py` |
 | output_table_csv.py | `UmiOCR-data/py_src/ocr/output/output_table_csv.py` |
@@ -50,14 +51,30 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 | BatchDOCConfigs.qml | `UmiOCR-data/qt_res/qml/TabPages/BatchDOC/BatchDOCConfigs.qml` |
 | BatchOCRConfigs.qml | `UmiOCR-data/qt_res/qml/TabPages/BatchOCR/BatchOCRConfigs.qml` |
 | ResultsTableView.qml | `UmiOCR-data/qt_res/qml/Widgets/ResultLayout/ResultsTableView.qml` |
+| PPOCR_umi.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/PPOCR_umi.py` |
+| PPOCR_config.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/PPOCR_config.py` |
+| engine.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/engine.py` |
+| table_structure.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/table_structure.py` |
+| punctuation_recovery.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/punctuation_recovery.py` |
 | **apply_host_patches.bat** | （部署脚本，不覆盖到 Umi） |
 
 ## v1.3 修复摘要
 
-- 双层 PDF 自动识别横排与竖排文字框，竖排字符保持直立并对齐原图。
-- 竖排段落复制按 OCR 阅读顺序输出：栏内从上到下、栏间从右到左，不再被
-  Chrome / Edge 按页面横坐标重排。
+- 双层 PDF 每个竖排 OCR 栏采用标准嵌入 CJK 连续 run，保障局部高亮与单栏连续复制。
+  Chrome/Edge 跨栏仍按几何左→右并可能换行；需严格语序请导出 TXT 或单层统一横排。
 - 单层 `text.pdf` 新增自动、统一横排、统一竖排三种排版方向。
+- P1 表格模型按表格 CSV 的明确请求触发；普通 OCR、截图与预览不会加载它。
+- 可选 JSONL 追踪将原始 OCR、预览和文档导出以同一请求 ID 记录，便于核对标点。
+- C3 默认内部启用：仅当竖排块存在高置信环形连通域、尺寸/视觉 cell 对齐时补 `。`，
+  且整栏只有一个可信候选时才补；并记录 `image_connected_component`、bbox、插入位置和置信度；
+  绝不由换行猜测。紧急回退可在启动前设置
+  `UMI_OCR_VERTICAL_PUNCTUATION_RECOVERY=0`。
+
+### 标点调试追踪（默认关闭）
+
+在 PaddleOCR 插件设置的“OCR 调试追踪 JSONL（可选）”填写 JSONL 文件路径后，
+批量文档会为每页记录 `raw_ocr`、`preview`、`document_export` 三个阶段及同一
+`request_id`。留空时不写文件；该功能只保存证据，不会根据换行补标点。
 
 ## v1.2 修复摘要
 

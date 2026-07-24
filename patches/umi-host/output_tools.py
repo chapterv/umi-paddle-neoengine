@@ -1,4 +1,74 @@
 # 从data中提取、拼接文本
+import datetime
+import json
+from pathlib import Path
+
+
+def resolve_trace_capture_path(argd):
+    """Find the optional JSONL trace destination without coupling to an API key."""
+    if not isinstance(argd, dict):
+        return ""
+    direct = argd.get("trace_capture_path")
+    if isinstance(direct, str) and direct.strip():
+        return direct.strip()
+    for key, value in argd.items():
+        if (
+            isinstance(key, str)
+            and key.startswith("ocr.")
+            and key.endswith(".trace_capture_path")
+            and isinstance(value, str)
+            and value.strip()
+        ):
+            return value.strip()
+    return ""
+
+
+def capture_ocr_trace(path, stage, res, *, request_id="", context=None):
+    """Append a best-effort, same-request OCR data snapshot to a UTF-8 JSONL file."""
+    if not path:
+        return False
+    try:
+        event = {
+            "time": datetime.datetime.now().isoformat(timespec="milliseconds"),
+            "request_id": request_id,
+            "stage": stage,
+            "code": res.get("code") if isinstance(res, dict) else None,
+            "data": res.get("data") if isinstance(res, dict) else None,
+        }
+        if context:
+            event["context"] = context
+        trace_path = Path(path)
+        trace_path.parent.mkdir(parents=True, exist_ok=True)
+        with trace_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, ensure_ascii=False, default=str) + "\n")
+        return True
+    except Exception:
+        # Debug capture must never convert a successful OCR/export into a failure.
+        return False
+
+
+def resolve_table_request_task(argd):
+    """Return the one-off engine task requested by a batch operation.
+
+    ``table_structure`` is an installed/enabled capability, not an instruction
+    to run the five P1 models for every image.  ``tableCsv`` is the explicit
+    user intent for this batch.  Keep this helper independent from the active
+    OCR API key: BatchOCR receives long config keys while document OCR may
+    already have shortened them.
+    """
+    if not isinstance(argd, dict) or not argd.get("mission.filesType.tableCsv"):
+        return "ocr"
+    if argd.get("table_structure") is True:
+        return "table"
+    for key, value in argd.items():
+        if (
+            isinstance(key, str)
+            and key.startswith("ocr.")
+            and key.endswith(".table_structure")
+            and value is True
+        ):
+            return "table"
+    return "ocr"
 def getDataText(data):
     textOut = ""
     l = len(data) - 1

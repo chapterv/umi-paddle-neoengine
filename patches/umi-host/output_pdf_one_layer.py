@@ -1,5 +1,6 @@
 # 单层纯文本 PDF
 
+import math
 import fitz  # PyMuPDF
 
 from umi_log import logger
@@ -14,6 +15,43 @@ class OutputPdfOneLayer(OutputPdfLayered):
         if self.textDirectionMode not in ("auto", "horizontal", "vertical"):
             self.textDirectionMode = "auto"
         self.outputPath = f"{self.dir}/{self.fileName}.text.pdf"  # 输出路径
+
+    def _insertVerticalText(self, page, box, text, fontsize, protation):
+        """Write visible upright CJK text with the font's vertical metrics."""
+        horizontalXref = page.insert_font(
+            fontname="cjkv", fontbuffer=self.font.buffer
+        )
+        topCenter = fitz.Point(
+            (box[0][0] + box[1][0]) / 2,
+            (box[0][1] + box[1][1]) / 2,
+        )
+        bottomCenter = fitz.Point(
+            (box[3][0] + box[2][0]) / 2,
+            (box[3][1] + box[2][1]) / 2,
+        )
+        longDx = bottomCenter.x - topCenter.x
+        longDy = bottomCenter.y - topCenter.y
+        longLength = math.hypot(longDx, longDy)
+        if longLength <= 0:
+            return
+        topCenter.x += longDx / longLength * fontsize * 0.12
+        topCenter.y += longDy / longLength * fontsize * 0.12
+        point = topCenter * page.derotation_matrix
+        localAngle = math.degrees(math.atan2(longDx, longDy))
+        morph = None
+        if abs(localAngle) > 0.01:
+            morph = (point, fitz.Matrix(localAngle))
+        page.insert_text(
+            point,
+            text,
+            fontsize,
+            fontname="cjkv",
+            rotate=protation,
+            morph=morph,
+            stroke_opacity=self.opacity,
+            fill_opacity=self.opacity,
+        )
+        self._bindVerticalFont(page, horizontalXref)
 
     # 创建空白 PDF
     def _getPDF(self, path):

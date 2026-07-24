@@ -7,6 +7,7 @@
 import fitz  # PyMuPDF
 import time
 import math
+import uuid
 from PIL import Image
 from io import BytesIO
 
@@ -16,7 +17,7 @@ from .mission_ocr import MissionOCR
 from ..ocr.tbpu import getParser
 from ..ocr.tbpu import IgnoreArea
 from ..ocr.tbpu.parser_tools.paragraph_parse import word_separator  # 上下句间隔符
-from ..ocr.output.tools import promote_table_on_res
+from ..ocr.output.tools import promote_table_on_res, resolve_trace_capture_path
 
 MinSize = 1080  # 最小渲染分辨率
 # 单页嵌套 OCR 最长等待（秒）。超时后 stop OCR + 本页记错并继续，避免 DOC 工人永久卡死。
@@ -350,6 +351,16 @@ class _MissionDocClass(Mission):
             for k in argd:
                 if k.startswith("ocr."):
                     ocrArgd[k] = argd[k]
+            # Preserve explicit table.csv intent through nested document OCR.
+            ocrArgd["request_task"] = argd.get("request_task", "ocr")
+            # Link raw OCR, preview and final document output for this page.
+            # The trace is diagnostic only; it never edits text or adds marks.
+            trace_request_id = ""
+            trace_capture_path = resolve_trace_capture_path(argd)
+            if trace_capture_path:
+                ocrArgd["trace_capture_path"] = trace_capture_path
+                trace_request_id = f"doc-p{page_ui}-{uuid.uuid4().hex}"
+                ocrArgd["trace_request_id"] = trace_request_id
             # 调用OCR，堵塞等待；带总超时，防止引擎假死后 DOC 永久卡在某一页
             t_ocr0 = time.time()
             logger.info(
@@ -431,6 +442,8 @@ class _MissionDocClass(Mission):
 
         # 表格网格等：提升 last_table / _table → res["table"]（ADR D4）
         resDict = promote_table_on_res(resDict, msnInfo.get("tbpu"))
+        if 'trace_request_id' in locals() and trace_request_id:
+            resDict["_trace_request_id"] = trace_request_id
 
         # ===== 仅提取文本时任务速度过快，频繁回调会导致UI卡死，因此故意引入延迟 =====
         currentTime = time.time()

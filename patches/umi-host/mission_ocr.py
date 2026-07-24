@@ -9,12 +9,18 @@
 """
 
 import os
+import uuid
 
 from umi_log import logger
 from .mission import Mission
 from ..ocr.tbpu import getParser, IgnoreArea
 from ..ocr.api import getApiOcr, getLocalOptions
-from ..ocr.output.tools import ensure_geometry_table_on_res, promote_table_on_res
+from ..ocr.output.tools import (
+    capture_ocr_trace,
+    ensure_geometry_table_on_res,
+    promote_table_on_res,
+    resolve_trace_capture_path,
+)
 from ..ocr.tbpu.parser_tools.table_grid import build_table
 from ..utils.utils import argdIntConvert
 
@@ -46,6 +52,13 @@ class __MissionOcrClass(Mission):
         # 实例化 tbpu 文本后处理模块
         msnInfo["tbpu"] = []
         argd = msnInfo["argd"]
+        # P1 is only a capability.  A request becomes a structure request when
+        # its batch caller explicitly asks for table.csv.
+        task = msnInfo.get("request_task") or argd.get("request_task") or "ocr"
+        msnInfo["request_task"] = "table" if task == "table" else "ocr"
+        msnInfo["trace_capture_path"] = resolve_trace_capture_path(argd)
+        if argd.get("trace_request_id"):
+            msnInfo["trace_request_id"] = str(argd["trace_request_id"])
         # 忽略区域
         if "tbpu.ignoreArea" in argd:
             iArea = argd["tbpu.ignoreArea"]
@@ -90,13 +103,23 @@ class __MissionOcrClass(Mission):
                 "data": "[Error] MissionOCR: API object is None (engine stopped).",
             }
         try:
+            request_task = msnInfo.get("request_task", "ocr")
             if "path" in msn:
-                res = self._api.runPath(msn["path"])
+                if request_task == "table":
+                    res = self._api.runPath(msn["path"], task="table")
+                else:
+                    res = self._api.runPath(msn["path"])
                 res["path"] = msn["path"]  # 结果字典中补充参数
             elif "bytes" in msn:
-                res = self._api.runBytes(msn["bytes"])
+                if request_task == "table":
+                    res = self._api.runBytes(msn["bytes"], task="table")
+                else:
+                    res = self._api.runBytes(msn["bytes"])
             elif "base64" in msn:
-                res = self._api.runBase64(msn["base64"])
+                if request_task == "table":
+                    res = self._api.runBase64(msn["base64"], task="table")
+                else:
+                    res = self._api.runBase64(msn["base64"])
             else:
                 res = {
                     "code": 901,
@@ -109,6 +132,20 @@ class __MissionOcrClass(Mission):
                 "code": 902,
                 "data": f"[Error] OCR engine call failed: {type(e).__name__}: {e}",
             }
+        trace_path = msnInfo.get("trace_capture_path")
+        trace_id = ""
+        if trace_path:
+            trace_id = msn.setdefault(
+                "_trace_request_id",
+                msnInfo.get("trace_request_id") or uuid.uuid4().hex,
+            )
+            capture_ocr_trace(
+                trace_path,
+                "raw_ocr",
+                res,
+                request_id=trace_id,
+                context={"request_task": msnInfo.get("request_task", "ocr")},
+            )
         # 任务成功时的后处理
         if res.get("code") == 100:
             # 计算平均置信度
@@ -147,6 +184,15 @@ class __MissionOcrClass(Mission):
                         break
             # 表格网格等：提升 last_table / _table → res["table"]
             res = promote_table_on_res(res, msnInfo.get("tbpu"))
+        if trace_path:
+            res["_trace_request_id"] = trace_id
+            capture_ocr_trace(
+                trace_path,
+                "preview",
+                res,
+                request_id=trace_id,
+                context={"request_task": msnInfo.get("request_task", "ocr")},
+            )
         return res
 
     def _onStopRequested(self, msnIDs):
