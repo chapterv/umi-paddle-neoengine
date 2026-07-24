@@ -36,6 +36,7 @@ if not exist "%PATCH_DIR%ResultsTableView.qml" set "MISS=1"
 if not exist "%PATCH_DIR%PPOCR_umi.py" set "MISS=1"
 if not exist "%PATCH_DIR%PPOCR_config.py" set "MISS=1"
 if not exist "%PATCH_DIR%engine.py" set "MISS=1"
+if not exist "%PATCH_DIR%model_sources.py" set "MISS=1"
 if not exist "%PATCH_DIR%table_structure.py" set "MISS=1"
 if not exist "%PATCH_DIR%punctuation_recovery.py" set "MISS=1"
 if "!MISS!"=="1" (
@@ -130,6 +131,7 @@ copy /Y "%DATA_ROOT%\qt_res\qml\Widgets\ResultLayout\ResultsTableView.qml" "%BAK
 copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_umi.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\PPOCR_config.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\engine.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
+copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\model_sources.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\table_structure.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 copy /Y "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\punctuation_recovery.py" "%BAK%\plugins\win_x64_PaddleOCR_Py\" >nul 2>&1
 
@@ -181,6 +183,8 @@ copy /Y "%PATCH_DIR%PPOCR_config.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\P
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%engine.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\engine.py" >nul
 if errorlevel 1 goto COPYFAIL
+copy /Y "%PATCH_DIR%model_sources.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\model_sources.py" >nul
+if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%table_structure.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\table_structure.py" >nul
 if errorlevel 1 goto COPYFAIL
 copy /Y "%PATCH_DIR%punctuation_recovery.py" "%DATA_ROOT%\plugins\win_x64_PaddleOCR_Py\punctuation_recovery.py" >nul
@@ -194,7 +198,7 @@ if exist "%PY_SRC%\ocr\tbpu\parser_tools\__pycache__" rd /s /q "%PY_SRC%\ocr\tbp
 
 echo.
 echo === DONE ===
-echo 25 host/plugin patches applied. Restart Umi-OCR.
+echo 26 host/plugin patches applied. Restart Umi-OCR.
 echo Rollback from: %BAK%
 echo.
 pause

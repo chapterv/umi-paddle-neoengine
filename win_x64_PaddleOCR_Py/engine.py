@@ -126,7 +126,7 @@ if _PADDLEX_HOME != os.path.join(_HERE, "paddlex"):
 from model_sources import configure_domestic_model_sources
 from paddleocr import PaddleOCR
 from table_structure import attach_table_result, structure_output_to_table
-from punctuation_recovery import recover_vertical_full_stops
+from punctuation_recovery import recover_vertical_punctuation
 
 configure_domestic_model_sources()
 
@@ -413,6 +413,7 @@ def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
             cpu_threads=cpu_threads,
             text_det_limit_side_len=limit_side_len,
             text_det_limit_type="max",
+            return_word_box=PUNCTUATION_RECOVERY_ENABLED,
             **({"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
                if IS_ONNX else {}),
         )
@@ -598,13 +599,47 @@ def convert(result, was_padded=True):
     polys = item.get("rec_polys") or item.get("dt_polys") or []
     texts = item.get("rec_texts") or []
     scores = item.get("rec_scores") or []
+    word_text_lines = item.get("text_word") or []
+    word_box_lines = item.get("text_word_boxes") or []
     data = []
-    for poly, text, score in zip(polys, texts, scores):
+    for index, (poly, text, score) in enumerate(zip(polys, texts, scores)):
         if was_padded:
             box = _unpad_box(poly)                       # ← 还原坐标
         else:
             box = [[int(round(x)), int(round(y))] for x, y in poly]
-        data.append({"box": box, "score": float(score), "text": str(text)})
+        block = {"box": box, "score": float(score), "text": str(text)}
+        if index < len(word_text_lines) and index < len(word_box_lines):
+            words = [str(word) for word in word_text_lines[index]]
+            word_boxes = []
+            try:
+                for rect in word_box_lines[index]:
+                    x0, y0, x1, y1 = [
+                        float(value) for value in np.asarray(rect).reshape(-1)
+                    ]
+                    word_box = [
+                        [x0, y0], [x1, y0], [x1, y1], [x0, y1]
+                    ]
+                    if was_padded:
+                        word_box = _unpad_box(word_box)
+                    else:
+                        word_box = [
+                            [int(round(x)), int(round(y))]
+                            for x, y in word_box
+                        ]
+                    word_boxes.append(word_box)
+            except (TypeError, ValueError):
+                word_boxes = []
+            if (
+                word_boxes
+                and len(words) == len(word_boxes)
+                and "".join(words) == block["text"]
+            ):
+                # Internal-only recognition geometry.  It is removed after
+                # image-evidenced punctuation recovery and never reaches the
+                # public JSON response.
+                block["_word_texts"] = words
+                block["_word_boxes"] = word_boxes
+        data.append(block)
     return {"code": 100, "data": data, "backend": _backend_tag()}
 
 
@@ -1077,14 +1112,21 @@ def main():
                         for _d in out.get("data", []):
                             try:
                                 _d["box"] = inv_fn(_d["box"])
+                                if _d.get("_word_boxes"):
+                                    _d["_word_boxes"] = [
+                                        inv_fn(_box)
+                                        for _box in _d["_word_boxes"]
+                                    ]
                             except Exception as _e:
+                                _d.pop("_word_texts", None)
+                                _d.pop("_word_boxes", None)
                                 sys.stderr.write(f"[preproc][WARN] 框逆映射失败跳过：{_e}\n")
                     # C3: raw OCR has already missed the punctuation on known
                     # vertical scans.  Use only original-image connected
                     # component evidence after boxes are back in that original
                     # coordinate system; never infer punctuation from wording.
                     try:
-                        recover_vertical_full_stops(
+                        recover_vertical_punctuation(
                             original_image if original_image is not None else _read_image_array(img),
                             out.get("data") or [],
                             enabled=PUNCTUATION_RECOVERY_ENABLED,
@@ -1094,6 +1136,10 @@ def main():
                             "[punctuation][WARN] conservative recovery skipped: "
                             f"{type(punctuation_exc).__name__}: {punctuation_exc}\n"
                         )
+                    finally:
+                        for _d in out.get("data", []):
+                            _d.pop("_word_texts", None)
+                            _d.pop("_word_boxes", None)
                     if task == "table" and TABLE_STRUCTURE_ENABLED:
                         t_table0 = time.perf_counter()
                         structure_table = None

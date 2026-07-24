@@ -1,7 +1,7 @@
-"""Conservative image-evidenced full-stop recovery for vertical OCR blocks.
+"""Conservative image-evidenced punctuation recovery for vertical OCR blocks.
 
 OCR text is never changed from linguistic context.  This module inserts only
-the CJK full stop ``。`` when an actual small annular connected component is
+``。``, ``，``, and ``：`` when their physical connected-component shape is
 found in an otherwise aligned vertical character cell.  The returned metadata
 is deliberately JSON-safe so raw/preview/document traces retain the evidence.
 """
@@ -37,6 +37,31 @@ def _vertical_block(block):
     return x0, y0, x1, y1, text
 
 
+def _slot_from_word_boxes(block, candidate_y, fallback):
+    """Map physical punctuation to the OCR text using recognition word boxes."""
+    text = block.get("text")
+    word_texts = block.get("_word_texts")
+    word_boxes = block.get("_word_boxes")
+    if (
+        not isinstance(text, str)
+        or not isinstance(word_texts, list)
+        or not isinstance(word_boxes, list)
+        or len(word_texts) != len(word_boxes)
+        or "".join(str(word) for word in word_texts) != text
+    ):
+        return fallback
+    slot = 0
+    for word, box in zip(word_texts, word_boxes):
+        rect = _rect_from_box(box)
+        if not rect:
+            return fallback
+        _, y0, _, y1 = rect
+        if (y0 + y1) / 2 >= candidate_y:
+            break
+        slot += len(str(word))
+    return slot
+
+
 def _annular_candidates(binary):
     """Return small contours with a real enclosed white hole (not speckle)."""
     contours, hierarchy = cv2.findContours(binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE)
@@ -57,6 +82,15 @@ def _annular_candidates(binary):
     return result
 
 
+def _connected_components(binary):
+    """Return isolated foreground components without relying on contour order."""
+    count, _, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
+    return [
+        tuple(int(value) for value in stats[index])
+        for index in range(1, count)
+    ]
+
+
 def _ink_run_heights(binary):
     """Height of the foreground row-run containing each y coordinate."""
     rows = np.any(binary > 0, axis=1)
@@ -72,13 +106,13 @@ def _ink_run_heights(binary):
     return heights
 
 
-def recover_vertical_full_stops(image_bgr, blocks, *, enabled=True):
-    """Mutate and return OCR blocks only when physical ``。`` evidence is strong.
+def recover_vertical_punctuation(image_bgr, blocks, *, enabled=True):
+    """Mutate OCR blocks only when physical punctuation evidence is strong.
 
-    Requirements intentionally stack: vertical geometry, annular connected
-    component, punctuation-scale dimensions, grid-cell alignment, and a low
-    ink punctuation cell compared with neighbouring character cells.  Any
-    uncertain case is returned unchanged.
+    Requirements intentionally stack: vertical geometry, punctuation-specific
+    connected-component shape, grid-cell alignment, low ink compared with
+    neighbouring character cells, and recognition word-box alignment when the
+    OCR backend provides it.  Any uncertain case is returned unchanged.
     """
     if not enabled or image_bgr is None or not isinstance(blocks, list):
         return blocks
@@ -142,22 +176,188 @@ def recover_vertical_full_stops(image_bgr, blocks, *, enabled=True):
             # is ink-heavy.  A stand-alone full stop cell is comparatively low.
             if ink_per_cell[slot] > median_ink * 0.72:
                 continue
-            if text[slot - 1: slot + 1].find("。") >= 0:
+            insert_slot = _slot_from_word_boxes(
+                block, iy0 + center, slot
+            )
+            if text[max(0, insert_slot - 1): insert_slot + 1].find("。") >= 0:
                 continue
             confidence = round(min(0.99, 0.80 + 0.10 * (1 - abs(center - expected_center) / (cell * 0.28)) + 0.10 * min(1.0, ratio / 0.35)), 3)
-            accepted_candidates.append((slot, cx, cy, w, h, confidence))
+            accepted_candidates.append(
+                (insert_slot, cx, cy, w, h, confidence)
+            )
         # Multiple plausible rings mean the image evidence is ambiguous.  Do
         # not depend on OpenCV contour order and never guess which ring is "。".
-        if len(accepted_candidates) != 1:
+        if len(accepted_candidates) > 1:
             continue
-        slot, cx, cy, w, h, confidence = accepted_candidates[0]
+        character = "。"
+        if accepted_candidates:
+            slot, cx, cy, w, h, confidence = accepted_candidates[0]
+        else:
+            comma_candidates = []
+            components = _connected_components(binary)
+            for cx, cy, w, h, area in components:
+                center_x = cx + w / 2
+                center_y = cy + h / 2
+                slot = int(center_y // cell)
+                if slot <= 0 or slot >= len(text):
+                    continue
+                if not (0.12 <= w / cell <= 0.35 and 0.25 <= h / cell <= 0.55):
+                    continue
+                if not (1.45 <= h / max(w, 1) <= 3.5):
+                    continue
+                if not (0.35 <= center_x / binary.shape[1] <= 0.65):
+                    continue
+                if not (0.025 <= area / (cell * cell) <= 0.10):
+                    continue
+                expected_center = slot * cell
+                if abs(center_y - expected_center) > cell * 0.36:
+                    continue
+                center_row = min(
+                    len(run_heights) - 1, max(0, int(round(center_y)))
+                )
+                if run_heights[center_row] > median_run_height * 0.55:
+                    continue
+                if ink_per_cell[slot] > median_ink * 0.50:
+                    continue
+                insert_slot = _slot_from_word_boxes(
+                    block, iy0 + center_y, slot
+                )
+                if text[
+                    max(0, insert_slot - 1): insert_slot + 1
+                ].find("，") >= 0:
+                    continue
+                confidence = round(
+                    min(
+                        0.97,
+                        0.80
+                        + 0.09
+                        * (1 - abs(center_y - expected_center) / (cell * 0.36))
+                        + 0.08 * (1 - ink_per_cell[slot] / (median_ink * 0.50)),
+                    ),
+                    3,
+                )
+                comma_candidates.append(
+                    (insert_slot, cx, cy, w, h, confidence)
+                )
+            if len(comma_candidates) > 1:
+                continue
+            if comma_candidates:
+                character = "，"
+                slot, cx, cy, w, h, confidence = comma_candidates[0]
+            else:
+                colon_candidates = []
+                for upper_index, upper in enumerate(components):
+                    ux, uy, uw, uh, upper_area = upper
+                    upper_center_x = ux + uw / 2
+                    upper_center_y = uy + uh / 2
+                    if not (
+                        0.08 <= uw / cell <= 0.22
+                        and 0.10 <= uh / cell <= 0.25
+                    ):
+                        continue
+                    if not (0.55 <= uw / max(uh, 1) <= 1.50):
+                        continue
+                    if not (0.010 <= upper_area / (cell * cell) <= 0.050):
+                        continue
+                    for lower in components[upper_index + 1:]:
+                        lx, ly, lw, lh, lower_area = lower
+                        lower_center_x = lx + lw / 2
+                        lower_center_y = ly + lh / 2
+                        if lower_center_y <= upper_center_y:
+                            continue
+                        if not (
+                            0.08 <= lw / cell <= 0.22
+                            and 0.10 <= lh / cell <= 0.25
+                        ):
+                            continue
+                        if not (0.55 <= lw / max(lh, 1) <= 1.50):
+                            continue
+                        if not (
+                            0.010 <= lower_area / (cell * cell) <= 0.050
+                        ):
+                            continue
+                        if abs(upper_center_x - lower_center_x) > cell * 0.08:
+                            continue
+                        gap = ly - (uy + uh)
+                        if not (0.04 <= gap / cell <= 0.22):
+                            continue
+                        center_x = (upper_center_x + lower_center_x) / 2
+                        center_y = (upper_center_y + lower_center_y) / 2
+                        if not (
+                            0.35 <= center_x / binary.shape[1] <= 0.65
+                        ):
+                            continue
+                        slot = int(center_y // cell)
+                        if slot <= 0 or slot >= len(text):
+                            continue
+                        if ink_per_cell[slot] > median_ink * 0.55:
+                            continue
+                        upper_row = min(
+                            len(run_heights) - 1,
+                            max(0, int(round(upper_center_y))),
+                        )
+                        lower_row = min(
+                            len(run_heights) - 1,
+                            max(0, int(round(lower_center_y))),
+                        )
+                        if (
+                            run_heights[upper_row] > median_run_height * 0.35
+                            or run_heights[lower_row]
+                            > median_run_height * 0.35
+                        ):
+                            continue
+                        insert_slot = _slot_from_word_boxes(
+                            block, iy0 + center_y, slot
+                        )
+                        if text[
+                            max(0, insert_slot - 1): insert_slot + 1
+                        ].find("：") >= 0:
+                            continue
+                        cx = min(ux, lx)
+                        cy = min(uy, ly)
+                        right = max(ux + uw, lx + lw)
+                        bottom = max(uy + uh, ly + lh)
+                        w, h = right - cx, bottom - cy
+                        confidence = round(
+                            min(
+                                0.98,
+                                0.84
+                                + 0.07
+                                * (
+                                    1
+                                    - abs(
+                                        upper_center_x - lower_center_x
+                                    )
+                                    / (cell * 0.08)
+                                )
+                                + 0.07
+                                * (
+                                    1
+                                    - ink_per_cell[slot]
+                                    / (median_ink * 0.55)
+                                ),
+                            ),
+                            3,
+                        )
+                        colon_candidates.append(
+                            (insert_slot, cx, cy, w, h, confidence)
+                        )
+                if len(colon_candidates) != 1:
+                    continue
+                character = "："
+                slot, cx, cy, w, h, confidence = colon_candidates[0]
         component_box = [
             [ix0 + cx, iy0 + cy], [ix0 + cx + w, iy0 + cy],
             [ix0 + cx + w, iy0 + cy + h], [ix0 + cx, iy0 + cy + h],
         ]
-        block["text"] = text[:slot] + "。" + text[slot:]
+        block["text"] = text[:slot] + character + text[slot:]
         block["punctuation_recovery"] = [{
-            "character": "。", "source": SOURCE, "confidence": confidence,
+            "character": character, "source": SOURCE, "confidence": confidence,
             "bbox": component_box, "insert_index": slot,
         }]
     return blocks
+
+
+def recover_vertical_full_stops(image_bgr, blocks, *, enabled=True):
+    """Backward-compatible entry point retained for existing host patches."""
+    return recover_vertical_punctuation(image_bgr, blocks, enabled=enabled)

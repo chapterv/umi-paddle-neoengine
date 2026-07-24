@@ -20,7 +20,7 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 
 脚本会：
 
-1. 校验 25 个宿主/插件补丁文件齐全
+1. 校验 26 个宿主/插件补丁文件齐全
 2. 解析 `Umi-OCR` / `UmiOCR-data` / `py_src` 路径  
 3. 备份原文件到 `py_src\_patch_backup_时间戳\`  
 4. 覆盖写入并清理相关 `__pycache__`  
@@ -54,6 +54,7 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 | PPOCR_umi.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/PPOCR_umi.py` |
 | PPOCR_config.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/PPOCR_config.py` |
 | engine.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/engine.py` |
+| model_sources.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/model_sources.py` |
 | table_structure.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/table_structure.py` |
 | punctuation_recovery.py | `UmiOCR-data/plugins/win_x64_PaddleOCR_Py/punctuation_recovery.py` |
 | **apply_host_patches.bat** | （部署脚本，不覆盖到 Umi） |
@@ -65,9 +66,10 @@ apply_host_patches.bat "C:\tools\Umi-OCR"
 - 单层 `text.pdf` 新增自动、统一横排、统一竖排三种排版方向。
 - P1 表格模型按表格 CSV 的明确请求触发；普通 OCR、截图与预览不会加载它。
 - 可选 JSONL 追踪将原始 OCR、预览和文档导出以同一请求 ID 记录，便于核对标点。
-- C3 默认内部启用：仅当竖排块存在高置信环形连通域、尺寸/视觉 cell 对齐时补 `。`，
-  且整栏只有一个可信候选时才补；并记录 `image_connected_component`、bbox、插入位置和置信度；
-  绝不由换行猜测。紧急回退可在启动前设置
+- C3 默认内部启用：仅依据竖排块原图中的高置信物理形状恢复 `。`、`，`、`：`；
+  分别要求环形连通域、孤立短笔画或两个小而对齐的墨点，并同时检查尺寸、视觉
+  cell、低墨量及字符/词框插入位置；记录 `image_connected_component`、bbox、
+  插入位置和置信度，绝不由换行或语义猜测。紧急回退可在启动前设置
   `UMI_OCR_VERTICAL_PUNCTUATION_RECOVERY=0`。
 
 ### 标点调试追踪（默认关闭）
