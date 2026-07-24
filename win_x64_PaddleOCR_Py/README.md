@@ -56,6 +56,8 @@
   国内三站是主力，Hugging Face 只作为最后备用；已存在于 `paddlex/` 的模型不会联网。
 - 依赖安装顺序为：**清华 PyPI 镜像 → 中科大 PyPI 镜像 → 官方 PyPI**。可在运行
   `setup.bat` 或 `install_table_models.bat` 前用 `PIP_INDEX`、`PIP_FALLBACK` 覆盖前两个源。
+- `install_table_models.bat` 的 P1 预下载只使用 CPU ONNX：它只负责下载和校验模型，
+  不会改变实际 OCR / P1 识别时的 GPU 选择。
 
 ## 使用方法（Umi-OCR GUI）
 1. 用 **Umi-OCR v2.1.5**（或兼容版本）打开本项目 `Umi-OCR/` 目录的程序。

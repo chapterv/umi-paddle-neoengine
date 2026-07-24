@@ -44,17 +44,19 @@ def dependency_status() -> dict:
 
 
 def engine_kwargs() -> dict:
+    """P1 模型预下载固定走 CPU，避免探测到残缺 CUDA DLL 后产生误导性报错。
+
+    这里只负责让 PaddleX 实例化并拉取/校验模型，不是实际表格识别路径。
+    主引擎仍保留自己的 CUDA DLL 搜索路径初始化和 GPU 选择策略；不能仅凭
+    get_available_providers() 列出 CUDA 就让这个一次性预下载进程加载 CUDA EP。
+    """
     try:
-        import onnxruntime as ort
+        import onnxruntime  # noqa: F401 - 保留原有“无 ONNX 时用 Paddle”的回退
     except ImportError:
         return {"engine": "paddle"}
-    providers = ["CPUExecutionProvider"]
-    available = ort.get_available_providers()
-    if "CUDAExecutionProvider" in available:
-        providers.insert(0, "CUDAExecutionProvider")
     return {
         "engine": "onnxruntime",
-        "engine_config": {"providers": providers},
+        "engine_config": {"providers": ["CPUExecutionProvider"]},
     }
 
 
