@@ -125,6 +125,11 @@ if _PADDLEX_HOME != os.path.join(_HERE, "paddlex"):
 
 from model_sources import configure_domestic_model_sources
 from paddleocr import PaddleOCR
+from formula_structure import (
+    build_formula_payload,
+    regions_to_ocr_blocks,
+    should_run_formula_layout,
+)
 from table_structure import attach_table_result, structure_output_to_table
 from punctuation_recovery import recover_vertical_punctuation
 
@@ -147,10 +152,27 @@ parser.add_argument("--limit_side_len", default="1920")
 parser.add_argument("--cpu_threads", default="6")
 parser.add_argument("--enable_mkldnn", default="True")  # paddlepaddle 3.2.1 已修复 PIR bug
 parser.add_argument("--ocr_version", default=None)  # 覆盖默认版本优先级
+parser.add_argument("--v6_model_size", default=None,
+                    help="PP-OCRv6 档位：medium(默认) / small；仅 ocr_version=PP-OCRv6 时生效")
 parser.add_argument(
     "--table_structure",
     default="False",
     help="是否允许宿主发送 task=table；默认关闭，模型首次使用时才加载",
+)
+parser.add_argument(
+    "--formula_recognition",
+    default="False",
+    help="是否允许宿主发送 task=formula / formula_layout；默认关闭",
+)
+parser.add_argument(
+    "--formula_mode",
+    default="mixed",
+    help="公式模式：mixed(默认) / whole_image；主要由宿主决定 request_task",
+)
+parser.add_argument(
+    "--formula_model_name",
+    default="PP-FormulaNet_plus-S",
+    help="公式模型：默认 plus-S；可切 plus-M 做高精度档",
 )
 # ── 文档预处理开关（默认开，对齐 PaddleOCR 3.x 原生行为；GUI 可关）──
 parser.add_argument("--use_doc_orientation", default=None,
@@ -250,6 +272,7 @@ DEVICE = "?"         # gpu / cpu
 ORT_VERSION = None   # onnxruntime 版本
 CUDA_VER = None      # 检测到的 CUDA 版本（如 12.x）
 LOADED_VER = None    # build_ocr 实际加载成功的 ocr_version（回退后可能与请求不同）
+LOADED_VARIANT = None  # 细分档位：如 PP-OCRv6-small / PP-OCRv6-medium
 USED_MKLDNN = None  # build_ocr 实际生效的 mkldnn（paddle 后端；回退后可能与请求不同）
 
 
@@ -348,6 +371,13 @@ use_doc_unwarping = to_bool(_use_doc_unwarp) if _use_doc_unwarp is not None else
 # ── 第1步：确定用户显式选择的版本（永远第0位）────────────
 _ocr_version_arg = getattr(args, "ocr_version", None) or ""
 _user_ver = _ocr_version_arg.strip() or "PP-OCRv6"   # 用户选择，默认 V6
+_v6_model_size_arg = getattr(args, "v6_model_size", None) or ""
+_user_v6_model_size = (_v6_model_size_arg.strip().lower() or "medium")
+if _user_v6_model_size not in {"medium", "small"}:
+    sys.stderr.write(
+        f"[engine][WARN] 未识别的 v6_model_size={_user_v6_model_size}，回退为 medium。\n"
+    )
+    _user_v6_model_size = "medium"
 
 # ── 第2步：取回退链（GUI 的 fallback_1/2/3 拼成）───
 _DEFAULT_CHAIN = ["PP-OCRv6", "PP-OCRv5", "PP-OCRv4"]
@@ -401,7 +431,21 @@ def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
     """
     import concurrent.futures
 
+    def _resolve_model_profile():
+        if ver != "PP-OCRv6":
+            return {}, ver
+        if _user_v6_model_size == "small":
+            return (
+                {
+                    "text_detection_model_name": "PP-OCRv6_small_det",
+                    "text_recognition_model_name": "PP-OCRv6_small_rec",
+                },
+                "PP-OCRv6-small",
+            )
+        return ({}, "PP-OCRv6-medium")
+
     def _do_init():
+        model_kwargs, _ = _resolve_model_profile()
         return PaddleOCR(
             device="cpu",
             lang=lang,
@@ -414,6 +458,7 @@ def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
             text_det_limit_side_len=limit_side_len,
             text_det_limit_type="max",
             return_word_box=PUNCTUATION_RECOVERY_ENABLED,
+            **model_kwargs,
             **({"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
                if IS_ONNX else {}),
         )
@@ -422,10 +467,10 @@ def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
         future = executor.submit(_do_init)
         try:
             ocr = future.result(timeout=timeout_sec)
-            return ocr, None
+            return ocr, _resolve_model_profile()[1], None
         except concurrent.futures.TimeoutError:
             future.cancel()  # 放弃该线程（进程退出时自动回收）
-            return None, TimeoutError(
+            return None, None, TimeoutError(
                 f"PaddleOCR({ver}, lang={lang}) 初始化超时 "
                 f"({timeout_sec}s)，可能该版本不支持此语言，已跳过"
             )
@@ -437,7 +482,7 @@ def _init_ocr_with_timeout(ver, mk, timeout_sec=90):
             # 所述「永久阻塞」。该 ValueError 穿透 build_ocr -> main -> engine.py
             # 整体崩溃（exit 1）-> 不打印 "OCR init completed." -> 回退链失效。
             # catch 后返回 (None, e)，让 build_ocr continue 跳下一版本（V5）。
-            return None, e
+            return None, None, e
 
 
 def build_ocr():
@@ -525,17 +570,18 @@ def build_ocr():
                 attempts.append((ver, False))
     last_err = None
     for ver, mk in attempts:
-        ocr, err = _init_ocr_with_timeout(ver, mk, timeout_sec=90)
+        ocr, variant, err = _init_ocr_with_timeout(ver, mk, timeout_sec=90)
         if err:
             last_err = err
             sys.stderr.write(f"[engine][WARN] {ver} mkldnn={mk} 初始化失败：{err}\n")
             continue
         # 初始化成功
-        global LOADED_VER, USED_MKLDNN
+        global LOADED_VER, LOADED_VARIANT, USED_MKLDNN
         LOADED_VER = ver
+        LOADED_VARIANT = variant or ver
         USED_MKLDNN = mk
         sys.stderr.write(
-            f"[engine] 已加载：{ver} / lang={lang} / cls={use_cls} "
+            f"[engine] 已加载：{LOADED_VARIANT} / lang={lang} / cls={use_cls} "
             f"/ mkldnn={mk} / limit={limit_side_len}\n"
         )
         if (not IS_ONNX) and enable_mkldnn and (mk is False):
@@ -800,6 +846,13 @@ def _is_fallback():
     """
     if LOADED_VER and LOADED_VER != _user_ver:
         return True          # 版本 ≠ 用户选择
+    if (
+        _user_ver == "PP-OCRv6"
+        and LOADED_VER == "PP-OCRv6"
+        and LOADED_VARIANT
+        and LOADED_VARIANT != f"PP-OCRv6-{_user_v6_model_size}"
+    ):
+        return True          # 版本 ≠ 用户选择
     if ENGINE == "onnxruntime-gpu" and DEVICE == "cpu":
         return True          # 请求 GPU 却跑 CPU
     if (not IS_ONNX) and enable_mkldnn and USED_MKLDNN is False:
@@ -814,7 +867,12 @@ def _backend_tag():
     仅当发生回退时，右侧追加「 | fb」短标记（绝不写「GPU回退」之类大字）。
     """
     ver = LOADED_VER or getattr(args, "ocr_version", None) or "PP-OCRv6"
+    variant = LOADED_VARIANT or ver
     ver_short = ver.replace("PP-OCRv", "") if "PP-OCRv" in ver else "6"
+    if variant == "PP-OCRv6-small":
+        ver_short = "6-small"
+    elif variant == "PP-OCRv6-medium":
+        ver_short = "6-medium"
     if DEVICE == "gpu":
         tag = "gpu(cuda)"                 # 真·GPU（CUDA 实际可用）
     elif IS_ONNX:
@@ -828,7 +886,8 @@ def _backend_tag():
         tag += " | fb"
     # 诊断日志（stderr → 引擎可见；帮助定位标签异常）
     sys.stderr.write(
-        f"[tag] {tag}  (LOADED_VER={LOADED_VER}, USER_CHOICE={_user_ver}, "
+        f"[tag] {tag}  (LOADED_VER={LOADED_VER}, LOADED_VARIANT={LOADED_VARIANT}, "
+        f"USER_CHOICE={_user_ver}/{_user_v6_model_size}, "
         f"DEVICE={DEVICE}, IS_ONNX={IS_ONNX}, fallback={fb})\n"
     )
     return tag
@@ -886,12 +945,44 @@ def run_ocr_safe(ocr, img):
 
 _TABLE_PIPELINE = None
 _GEOMETRY_BUILDER = None
+_FORMULA_PIPELINES = {}
+
+# 公式默认档：优先“小而专”的公式模型，而不是大而全文档管线。
+# 默认 plus-S；GUI 可显式切到 plus-M。
+FORMULA_MODEL_NAME = (
+    (getattr(args, "formula_model_name", None) or "PP-FormulaNet_plus-S").strip()
+    or "PP-FormulaNet_plus-S"
+)
 
 
 def _table_pipeline_kwargs():
     if IS_ONNX:
         return {"engine": "onnxruntime", "engine_config": ENGINE_CONFIG}
     return {"engine": "paddle"}
+
+
+def _formula_pipeline_kwargs():
+    # Paddle 官方当前未提供 PP-FormulaNet_plus-S / plus-M 的 onnx 包。
+    # 主 OCR 即使跑 onnx/cuda，公式子管线也必须独立回到 paddle，
+    # 否则 whole_image 公式请求会直接抛：
+    #   Official model source does not provide a 'onnx' package ...
+    return {"engine": "paddle"}
+
+
+def _get_formula_pipeline(mode="layout"):
+    """首次公式任务时才加载公式模型；默认 OCR 启动零额外开销。"""
+    global _FORMULA_PIPELINES
+    if mode not in _FORMULA_PIPELINES:
+        from paddleocr import FormulaRecognitionPipeline
+
+        _FORMULA_PIPELINES[mode] = FormulaRecognitionPipeline(
+            use_doc_orientation_classify=False,
+            use_doc_unwarping=False,
+            use_layout_detection=(mode == "layout"),
+            formula_recognition_model_name=FORMULA_MODEL_NAME,
+            **_formula_pipeline_kwargs(),
+        )
+    return _FORMULA_PIPELINES[mode]
 
 
 def _get_table_pipeline():
@@ -917,7 +1008,7 @@ def _read_image_array(img):
         return img
     arr = cv2.imdecode(np.fromfile(img, dtype=np.uint8), cv2.IMREAD_COLOR)
     if arr is None:
-        raise RuntimeError(f"table image read failed: {img}")
+        raise RuntimeError(f"image read failed: {img}")
     return arr
 
 
@@ -977,6 +1068,37 @@ def run_table_structure(img, ocr_blocks):
     if not table:
         raise RuntimeError("table structure pipeline returned no table")
     return table
+
+
+def run_formula_structure(img, ocr_blocks=None, *, mode="layout"):
+    """运行公式识别子管线并返回结构化 regions。"""
+    saved_fd = os.dup(1)
+    sys.stdout.flush()
+    os.dup2(2, 1)
+    try:
+        pipeline = _get_formula_pipeline(mode)
+        output = list(
+            pipeline.predict(
+                input=img,
+                use_layout_detection=(mode == "layout"),
+                use_doc_orientation_classify=False,
+                use_doc_unwarping=False,
+            )
+        )
+    finally:
+        os.dup2(saved_fd, 1)
+        os.close(saved_fd)
+    image_shape = _read_image_array(img).shape
+    payload = build_formula_payload(
+        output[0] if len(output) == 1 else output,
+        mode=mode,
+        model_name=FORMULA_MODEL_NAME,
+        ocr_blocks=ocr_blocks or [],
+        image_shape=image_shape,
+    )
+    if not payload.get("regions"):
+        raise RuntimeError("formula pipeline returned no regions")
+    return payload
 
 
 def _get_geometry_builder():
@@ -1043,6 +1165,7 @@ def main():
         preprocess_ms = 0.0
         ocr_ms = 0.0
         table_ms = 0.0
+        formula_ms = 0.0
         convert_ms = 0.0
         json_encode_ms = 0.0
         tmp_padded = None          # 需要清理的补丁临时文件
@@ -1055,6 +1178,18 @@ def main():
                 out = {"code": 100, "data": []}
             elif isinstance(img, str) and img == "unknown":
                 out = {"code": 901, "data": "未知指令"}
+            elif task == "formula":
+                t_formula0 = time.perf_counter()
+                formula_payload = run_formula_structure(
+                    img, ocr_blocks=None, mode="whole_image"
+                )
+                formula_ms = (time.perf_counter() - t_formula0) * 1000
+                out = {
+                    "code": 100,
+                    "data": regions_to_ocr_blocks(formula_payload["regions"]),
+                }
+                out["formula"] = formula_payload
+                out["regions"] = formula_payload["regions"]
             else:
                 # 判断是否为 base64 产生的临时文件（需后续删除）
                 is_b64_tmp = (isinstance(img, str) and
@@ -1140,6 +1275,20 @@ def main():
                         for _d in out.get("data", []):
                             _d.pop("_word_texts", None)
                             _d.pop("_word_boxes", None)
+                    if task == "formula_layout":
+                        if should_run_formula_layout(out.get("data") or []):
+                            t_formula0 = time.perf_counter()
+                            formula_payload = run_formula_structure(
+                                img, out.get("data") or [], mode="layout"
+                            )
+                            formula_ms = (time.perf_counter() - t_formula0) * 1000
+                            out["formula"] = formula_payload
+                            out["regions"] = formula_payload["regions"]
+                            out["data"] = regions_to_ocr_blocks(formula_payload["regions"])
+                        else:
+                            sys.stderr.write(
+                                "[formula] skip layout pipeline: OCR blocks look like plain prose.\n"
+                            )
                     if task == "table" and TABLE_STRUCTURE_ENABLED:
                         t_table0 = time.perf_counter()
                         structure_table = None
@@ -1198,7 +1347,8 @@ def main():
             f"[perf] #{req_count} total_ms={dt_ms:.1f} decode_ms={decode_ms:.1f} "
             f"preprocess_ms={preprocess_ms:.1f} ocr_det=unavailable "
             f"ocr_rec=unavailable ocr_ms={ocr_ms:.1f} "
-            f"table_ms={table_ms:.1f} convert_ms={convert_ms:.1f} "
+            f"table_ms={table_ms:.1f} formula_ms={formula_ms:.1f} "
+            f"convert_ms={convert_ms:.1f} "
             f"json_encode_ms={json_encode_ms:.1f} "
             f"rss_mb={rss} gpu_mem_mb={gpu_mem} "
             f"backend={ENGINE_LABEL} ver={ver} conf={_avg_conf:.2f} "

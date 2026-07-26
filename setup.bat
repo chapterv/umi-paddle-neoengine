@@ -4,12 +4,15 @@ setlocal enabledelayedexpansion
 cd /d "%~dp0"
 
 set "PLUGIN=Umi-OCR\UmiOCR-data\plugins\win_x64_PaddleOCR_Py"
+set "STATUS_PY=%PLUGIN%\install_status.py"
 set "VENV=%PLUGIN%\.venv_gpu"
 set "PY=%VENV%\Scripts\python.exe"
 set "CHOICE_FILE=%TEMP%\local_ocr_choice.txt"
+set "ENV_KIND=gpu"
+set "MODEL_STATE=pending"
 
 echo ============================================================
-echo  Local-Ocr 新引擎部署（基础 OCR + 可选 P1 表格模型）
+echo  Local-Ocr 新引擎部署（基础 OCR + 可选 P1 表格/公式模型）
 echo ============================================================
 
 REM --- 1) 准备 Python（优先用 uv 自动下载 3.12，venv 内自带解释器）---
@@ -105,6 +108,7 @@ if "%BACKEND%"=="2" (
   REM CPU 与主项目对齐：Python 3.11+ 用 1.26.0；3.10 最高 1.23.2。
   set "VENV=%PLUGIN%\.venv"
   set "PY=%PLUGIN%\.venv\Scripts\python.exe"
+  set "ENV_KIND=cpu"
   if "%PYVER%"=="310" (
     set "SPEC=onnxruntime==1.23.2"
   ) else (
@@ -224,6 +228,7 @@ if errorlevel 1 (
   "%PY%" -m pip install "paddlepaddle==3.2.1" "paddleocr==3.7.0" %PIP_OFFICIAL_EXTRA%
 )
 if errorlevel 1 (
+  if exist "%PY%" "%PY%" "%STATUS_PY%" mark-env --env %ENV_KIND% --status failed --backend "%SPEC%" --models failed --error "paddlepaddle/paddleocr install failed" >nul 2>&1
   echo [ERROR] paddlepaddle/paddleocr 安装失败，检查网络/代理后重试。
   pause
   exit /b 1
@@ -252,6 +257,7 @@ if errorlevel 1 (
       goto ORT_INSTALLED
     )
   )
+  if exist "%PY%" "%PY%" "%STATUS_PY%" mark-env --env %ENV_KIND% --status failed --backend "%SPEC%" --models failed --error "onnxruntime install failed" >nul 2>&1
   echo [ERROR] 推理后端 %SPEC% 安装失败。
   echo   这通常**不是** Python 3.11 的问题。请对照日志：
   echo   A^) 若提示 nvidia-cuda-nvrtc-cu13 / nvidia-*-cu13：PyPI 尚无 cu13 正式包
@@ -283,6 +289,7 @@ REM 强制校验：GUI 默认 engine=onnxruntime，import 必须成功（onnxrun
 echo        校验 import onnxruntime ...
 "%PY%" -c "import onnxruntime as o; print('onnxruntime', o.__version__, o.get_available_providers())"
 if errorlevel 1 (
+  if exist "%PY%" "%PY%" "%STATUS_PY%" mark-env --env %ENV_KIND% --status failed --backend "%SPEC%" --models failed --error "onnxruntime import failed" >nul 2>&1
   echo [ERROR] onnxruntime 已 pip 安装但 import 失败。请删掉 %VENV% 后重跑 setup.bat。
   pause
   exit /b 1
@@ -321,8 +328,10 @@ if "%FULL_INSTALL%"=="1" (
     )
     "!PY_CPU!" -c "import onnxruntime as o; print('[全安装] CPU ort', o.__version__)"
     if errorlevel 1 (
+      "!PY_CPU!" "%STATUS_PY%" mark-env --env cpu --status failed --backend "onnxruntime" --models pending --error "cpu onnxruntime import failed" >nul 2>&1
       echo [WARN] CPU .venv 的 onnxruntime 校验失败；.venv_gpu 仍可用（若 GPU 包完整）。
     ) else (
+      "!PY_CPU!" "%STATUS_PY%" check-env --env cpu --backend "onnxruntime" --models pending >nul 2>&1
       echo        [全安装] CPU .venv 就绪。
     )
   ) else (
@@ -332,7 +341,13 @@ if "%FULL_INSTALL%"=="1" (
 
 echo        预下载模型（范围选项 %CHOICE%）...
 "%PY%" "%~dp0deploy.py" --choice %CHOICE%
-if errorlevel 1 ( echo [WARN] 模型预下载异常，首次识别会自动下载。 )
+if errorlevel 1 (
+  set "MODEL_STATE=deferred"
+  echo [WARN] 模型预下载异常，首次识别会自动下载。
+) else (
+  set "MODEL_STATE=ready"
+)
+if exist "%PY%" "%PY%" "%STATUS_PY%" check-env --env %ENV_KIND% --backend "%SPEC%" --models "!MODEL_STATE!" >nul 2>&1
 
 REM --- 5) 第4步：P1 表格结构模型（可选，默认不安装）---
 echo.
@@ -346,12 +361,36 @@ if /I "!TABLE_INSTALL!"=="Y" (
   set "TABLE_INSTALL_RC=!ERRORLEVEL!"
   set "TABLE_PY="
   if not "!TABLE_INSTALL_RC!"=="0" (
+    if exist "%PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status failed --detail "setup-step4" --error "install_table_models.bat failed rc=!TABLE_INSTALL_RC!" >nul 2>&1
     echo [ERROR] P1 表格结构模型安装失败，普通 OCR 与 P0 几何表格仍可使用。
     pause
     exit /b !TABLE_INSTALL_RC!
   )
 ) else (
+  if exist "%PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status skipped --detail "user skipped setup step4" >nul 2>&1
   echo        已跳过 P1。以后可双击 install_table_models.bat 单独补装。
+)
+
+REM --- 6) 第5步：P1 公式模型（可选，默认不安装）---
+echo.
+echo 第5步：可选公式识别模型
+echo   默认档为 PP-FormulaNet_plus-S；适合公式截图和图文混排。
+echo   预下载混排模式会额外准备版面模型，总体积明显高于基础 OCR，默认不安装。
+set /p FORMULA_INSTALL=是否安装 P1 公式模型？请输入 Y/N（直接回车 = N）：
+if /I "!FORMULA_INSTALL!"=="Y" (
+  set "FORMULA_PY=%PY%"
+  call "%~dp0install_formula_models.bat" --from-setup
+  set "FORMULA_INSTALL_RC=!ERRORLEVEL!"
+  set "FORMULA_PY="
+  if not "!FORMULA_INSTALL_RC!"=="0" (
+    if exist "%PY%" "%PY%" "%STATUS_PY%" mark-optional --name formula_p1 --status failed --detail "setup-step5" --error "install_formula_models.bat failed rc=!FORMULA_INSTALL_RC!" >nul 2>&1
+    echo [ERROR] P1 公式模型安装失败，普通 OCR 与表格功能仍可使用。
+    pause
+    exit /b !FORMULA_INSTALL_RC!
+  )
+) else (
+  if exist "%PY%" "%PY%" "%STATUS_PY%" mark-optional --name formula_p1 --status skipped --detail "user skipped setup step5" >nul 2>&1
+  echo        已跳过 P1。以后可双击 install_formula_models.bat 单独补装。
 )
 
 echo.
@@ -360,7 +399,7 @@ echo  部署完成。现在可以：
 echo   1. 双击 Umi-OCR\Umi-OCR.exe 打开主程序
 echo   2. 在「全局设置 - 文字识别」选择 PaddleOCR（本地·PP-OCRv6/v5/v4）
 echo   3. 拖入图片开始 - 首次会自动用对应引擎
-echo   4. 若安装了 P1，可在插件设置开启「表格结构模型（P1·可选）」
+echo   4. 若安装了 P1，可在插件设置开启「表格结构模型」或「公式识别」
 echo ============================================================
 pause
 goto :eof

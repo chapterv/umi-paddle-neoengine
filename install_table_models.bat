@@ -26,6 +26,7 @@ exit /b 0
 
 :ARGS_DONE
 set "PLUGIN="
+set "STATUS_PY="
 if exist "%~dp0Umi-OCR\UmiOCR-data\plugins\win_x64_PaddleOCR_Py\requirements-table.txt" (
   set "PLUGIN=%~dp0Umi-OCR\UmiOCR-data\plugins\win_x64_PaddleOCR_Py"
 )
@@ -37,6 +38,7 @@ if not defined PLUGIN (
   set "RC=2"
   goto FINISH
 )
+set "STATUS_PY=%PLUGIN%\install_status.py"
 
 set "PY="
 if defined TABLE_PY if exist "%TABLE_PY%" set "PY=%TABLE_PY%"
@@ -69,6 +71,7 @@ echo [2] Python：%PY%
 if /I "%MODE%"=="check" (
   "%PY%" "%PLUGIN%\download_table_models.py" --check
   set "RC=%ERRORLEVEL%"
+  if "%RC%"=="0" if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status checked --detail "download_table_models --check ok" >nul 2>&1
   goto FINISH
 )
 
@@ -89,6 +92,7 @@ if errorlevel 1 (
 )
 if errorlevel 1 (
   echo [ERROR] P1 可选依赖安装失败。
+  if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status failed --detail "requirements-table" --error "pip install requirements-table.txt failed" >nul 2>&1
   set "RC=4"
   goto FINISH
 )
@@ -96,12 +100,14 @@ if errorlevel 1 (
 "%PY%" "%PLUGIN%\download_table_models.py" --check
 if errorlevel 1 (
   echo [ERROR] P1 依赖校验失败。
+  if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status failed --detail "download_table_models --check" --error "dependency verification failed" >nul 2>&1
   set "RC=5"
   goto FINISH
 )
 
 if /I "%MODE%"=="deps" (
   echo [OK] P1 依赖已安装；表格模型会在首次开启 P1 时自动下载。
+  if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status deps_ready --detail "dependencies installed, model deferred" >nul 2>&1
   set "RC=0"
   goto FINISH
 )
@@ -110,10 +116,12 @@ echo [4] 预下载 P1 表格结构模型（约 955 MB，请耐心等待）...
 "%PY%" "%PLUGIN%\download_table_models.py" --download
 if errorlevel 1 (
   echo [ERROR] 表格模型预下载失败。依赖已经安装，可稍后重试本脚本。
+  if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status failed --detail "download_table_models --download" --error "model predownload failed" >nul 2>&1
   set "RC=6"
   goto FINISH
 )
 echo [OK] P1 表格结构模型已就绪。
+if exist "%STATUS_PY%" "%PY%" "%STATUS_PY%" mark-optional --name table_p1 --status complete --detail "dependencies and models ready" >nul 2>&1
 set "RC=0"
 
 :FINISH

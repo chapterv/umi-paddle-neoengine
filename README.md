@@ -2,7 +2,7 @@
 
 **Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
-[![Version](https://img.shields.io/badge/version-1.3-orange)](./VERSION)
+[![Version](https://img.shields.io/badge/version-1.4-orange)](./VERSION)
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
@@ -10,17 +10,26 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.3**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
+- **当前源码版本**：**1.4**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
-  - `umi-paddle-neoengine-deploy-v1.3.zip` — 纯净部署（需 `setup.bat`）
-  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.3.zip` — ONNX V6 CPU 懒人包
+  - `umi-paddle-neoengine-deploy-v1.4.zip` — 纯净部署（需 `setup.bat`）
+  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.zip` — ONNX V6 CPU 懒人包（含公式功能代码）
+  - `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` — 同版本懒人包的可选公式模型增量包
 - **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)
   - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行
     [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)
     （可拖入 `Umi-OCR` 目录；会先备份再覆盖 25 个宿主/插件文件）
 
 ---
+
+## v1.4：P1 公式识别（可选）
+
+- 先运行根目录 `install_formula_models.bat`，再到 **全局设置 → 文字识别** 开启 **`公式识别（P1·可选）`**。
+- 默认使用 `PP-FormulaNet_plus-S`；“混排公式区域”会额外使用 `PP-DocLayout_plus-L` 定位页面内的公式，也可切换为“整图公式”。
+- 公式模型不塞进基础包。离线使用时，把 `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` 解压到**同版本 v1.4** CPU 懒人包根目录即可。
+- 旧 v1.3.x 懒人包只有旧代码，不能只补公式模型；需要先换用 v1.4 CPU 懒人包。普通文字截图会跳过公式版面管线。
+- 当前先提供公式识别与结果回传；公式可视化渲染、PDF / Markdown 公式排版留待后续增强。
 
 ## 项目简介
 
@@ -59,6 +68,7 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 - 可选：**Paddle 原生 + MKLDNN**（CPU 加速，须钉死 3.2.1）  
 - 模型缓存到插件内 **`paddlex/`**，懒人包可预置、纯净包可首次自动下载  
 - P0 几何表格 CSV 默认可用；P1 复杂表结构模型按需安装、默认关闭
+- P1 公式识别按需安装：默认 `PP-FormulaNet_plus-S`，支持整图公式或图文混排公式区域；普通 OCR 不会默认加载
 - 官方原版 Umi 如需表格 UI/导出，运行 [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)
 
 一句话：**Umi 壳子不动，本地识别引擎换代到 PP-OCRv6，并可选 GPU。**
@@ -223,8 +233,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 ### 方式 A：完整发布包（推荐最终用户）
 
 1. 从 `umi-paddle-neoengine-release/` 取 zip：  
-   - **`umi-paddle-neoengine-deploy-v1.3.zip`**：小包，需联网 `setup.bat`
-   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.3.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU
+   - **`umi-paddle-neoengine-deploy-v1.4.zip`**：小包，需联网 `setup.bat`
+   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.4.zip`**：含 `.venv` + V6 ONNX 模型，默认 ONNX CPU
 2. 解压到**尽量纯英文路径**（如 `C:\Local-Ocr\`；中文路径下 paddle 原生更易出问题，ONNX 相对稳）  
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  

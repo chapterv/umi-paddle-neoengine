@@ -125,15 +125,17 @@ globalOptions = {
     "ocr_version": {
         "title": tr("选择模型版本（最优先）"),
         "optionsList": [
-            ["PP-OCRv6", "v6 medium（高精度·默认）"],
+            ["PP-OCRv6-medium", "v6 medium（高精度·默认）"],
+            ["PP-OCRv6-small", "v6 small（更轻更快）"],
             ["PP-OCRv5", "v5（多语言·韩/俄）"],
             ["PP-OCRv4", "v4 mobile（快速）"],
         ],
-        "default": "PP-OCRv6",
+        "default": "PP-OCRv6-medium",
         "toolTip": tr(
             "用户选择的模型版本将作为**第一优先**尝试目标。\n"
             "若所选版本初始化失败，自动按下方「版本回退链」依次尝试其他版本。\n"
             "v6 medium：识别精度最高，简/繁/英/日文首选。\n"
+            "v6 small：更轻更快，适合先求速度或低内存场景。\n"
             "v5：支持韩语/俄语等 PP-OCRv6 未覆盖的语言。\n"
             "v4 mobile：速度快约 2.7 倍，适合日常截图。"
         ),
@@ -178,6 +180,39 @@ globalOptions = {
             "开启后，本插件按 task=table 使用 PaddleOCR TableRecognitionPipelineV2。"
             "首次使用会下载额外表结构权重；失败自动回退现有几何网格。"
             "默认关闭，不增加普通 OCR 的启动时间与模型体积。"
+        ),
+    },
+    "formula_recognition": {
+        "title": tr("公式识别（P1·可选）"),
+        "default": False,
+        "toolTip": tr(
+            "开启后，本插件会按显式公式模式请求 Paddle 公式子管线，"
+            "保持主文字 OCR 仍为当前 PP-OCRv6。"
+            "默认关闭，不增加普通 OCR 的启动时间与模型体积。"
+        ),
+    },
+    "formula_mode": {
+        "title": tr("公式识别模式"),
+        "optionsList": [
+            ["mixed", "图文混排（默认）"],
+            ["whole_image", "整图公式"],
+        ],
+        "default": "mixed",
+        "toolTip": tr(
+            "图文混排：保留文字 OCR，并补充公式区域 LaTeX。\n"
+            "整图公式：把整张图当成单个公式识别，更适合公式截图。"
+        ),
+    },
+    "formula_model_name": {
+        "title": tr("公式模型档位"),
+        "optionsList": [
+            ["PP-FormulaNet_plus-S", "plus-S（默认·更轻更快）"],
+            ["PP-FormulaNet_plus-M", "plus-M（高精度）"],
+        ],
+        "default": "PP-FormulaNet_plus-S",
+        "toolTip": tr(
+            "plus-S：当前默认档，更小、更适合本地 OCR 工具。\n"
+            "plus-M：更适合中文复杂公式，但模型更大、CPU 更慢。"
         ),
     },
     "trace_capture_path": {
@@ -255,6 +290,42 @@ localOptions = {
         "toolTip": tr(
             "将边长大于该值的图片进行压缩以提高速度。值越大精度越高但越慢；"
             "1920 适配大多数高 DPI 屏幕，960 适合纯速度优先场景。"
+        ),
+    },
+    "formula_recognition": {
+        "title": tr("公式识别（P1·可选）"),
+        "optionsList": _THREE_STATE,
+        "default": "global",
+        "toolTip": tr(
+            "开启 / 关闭 / 使用全局参数。默认『使用全局参数』沿用全局设置。"
+        ),
+    },
+    "formula_mode": {
+        "title": tr("公式识别模式"),
+        "optionsList": [
+            ["global", "使用全局参数"],
+            ["mixed", "图文混排（默认）"],
+            ["whole_image", "整图公式"],
+        ],
+        "default": "global",
+        "toolTip": tr(
+            "开启 / 关闭 / 使用全局参数。默认『使用全局参数』沿用全局设置。\n"
+            "图文混排：保留文字 OCR，并补充公式区域 LaTeX。\n"
+            "整图公式：把整张图当成单个公式识别，更适合公式截图。"
+        ),
+    },
+    "formula_model_name": {
+        "title": tr("公式模型档位"),
+        "optionsList": [
+            ["global", "使用全局参数"],
+            ["PP-FormulaNet_plus-S", "plus-S（默认·更轻更快）"],
+            ["PP-FormulaNet_plus-M", "plus-M（高精度）"],
+        ],
+        "default": "global",
+        "toolTip": tr(
+            "默认『使用全局参数』沿用全局设置。\n"
+            "plus-S：当前默认档，更小、更适合本地 OCR 工具。\n"
+            "plus-M：更适合中文复杂公式，但模型更大、CPU 更慢。"
         ),
     },
     # ── 文档预处理（窗口级覆盖，默认『使用全局参数』）──

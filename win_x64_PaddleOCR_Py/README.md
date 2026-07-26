@@ -31,8 +31,9 @@
 | `requirements.txt` | `paddlepaddle==3.2.1` + `paddleocr==3.7.0` + `onnxruntime-gpu[cuda,cudnn]==1.26.0`（默认 CUDA 12.9）/ `1.27.0`（CUDA 13） |
 | `requirements-table.txt` | P1 表格结构模型可选依赖；默认基础安装不安装 |
 | `table_structure.py` | P1 HTML rowspan/colspan → Umi 通用二维 table 协议 |
-| `punctuation_recovery.py` | 竖排 `。` 的保守图像连通域恢复；只接受唯一高置信候选 |
 | `download_table_models.py` | P1 依赖检查和约 955 MB 表格模型预下载 |
+| `formula_structure.py` | P1 公式/混排结果 → Umi 通用 regions + textBlocks 协议 |
+| `download_formula_models.py` | P1 公式模型检查和预下载（默认 plus-S） |
 | `.venv/` | 隔离 Python 环境（含 paddle，已装；**不进 git**） |
 | `paddlex/` | **真实 OCR 模型权重目录**（PP-OCRv4 / v5 / v6 的检测+识别+方向分类模型） |
 
@@ -64,11 +65,14 @@
 2. 全局设置 → 「引擎」下拉框，选择本插件（名为 **PaddleOCR（本地）** / 对应 `win_x64_PaddleOCR_Py`）。
 3. 「文字识别 → 语言/模型库」选择所需语言：
    - 简体中文 / English / 繁體中文 / 日本語 / 한국어 / Русский（俄文）
-4. 模型位置由 `engine.py` 通过环境变量 `PADDLE_PDX_CACHE_HOME` **重定向到插件自己的 `paddlex/` 目录**
+4. 如需在 v6 下切轻量模型：全局设置 → 文字识别 → 先选 **PP-OCRv6**，再把
+   **`v6 模型档位`**切到 **`small`**。该选项会显式请求官方
+   `PP-OCRv6_small_det` / `PP-OCRv6_small_rec`；默认 `medium` 仍为精度优先。
+5. 模型位置由 `engine.py` 通过环境变量 `PADDLE_PDX_CACHE_HOME` **重定向到插件自己的 `paddlex/` 目录**
    （`Umi-OCR/UmiOCR-data/plugins/win_x64_PaddleOCR_Py/paddlex/`），与系统全局 `~/.paddlex` 无关。
    懒人版已把模型预置到此目录；简洁版首次识别某语言时，paddle 会**自动下载并缓存**到这里
    （约几十~上百 MB，只需一次，无需手动搬运）。
-5. 拖入图片或粘贴截图即可识别。
+6. 拖入图片或粘贴截图即可识别。
 
 ## 表格识别
 
@@ -79,18 +83,28 @@
 - **P1 模型方式**：先运行根目录 `install_table_models.bat`。重启 Umi 后进入
   **全局设置 → 文字识别**，开启 **`表格结构模型（P1·可选）`**，点击
   **`应用修改`**。P1 支持复杂有线/无线表和合并表头；失败自动回退 P0。
-- 开启 P1 只是允许使用表格能力；只有当前批次明确勾选 `table.csv` 才发送
-  `task=table`。普通截图、预览和文档 OCR 固定使用 `task=ocr`，不会加载 P1。
 - 两种方式都通过 **`table.csv 结构表格(Excel)`**输出 `_table.csv`。
   P0 更轻；P1 额外占用约 955 MB 模型并增加冷启动和内存。
 
-## 竖排句号与调试追踪
+## 公式识别
 
-- 引擎只在竖排栏原图中找到唯一高置信环形连通域，且尺寸、位置、视觉 cell、
-  低墨量均可信时恢复 `。`；不会根据换行或语义猜标点。
-- 紧急关闭：启动前设置 `UMI_OCR_VERTICAL_PUNCTUATION_RECOVERY=0`。
-- 设置中的 **OCR 调试追踪 JSONL（可选）** 默认留空；填写路径后，批量文档会以
-  同一 request ID 记录 `raw_ocr`、`preview`、`document_export` 三阶段证据。
+- 先运行根目录 `install_formula_models.bat`。默认预下载：
+  - `PP-FormulaNet_plus-S`
+  - 混排模式所需版面模型
+- 重启 Umi 后进入 **全局设置 → 文字识别**：
+  - 开启 **`公式识别（P1·可选）`**
+  - 选择 **`公式识别模式`**
+    - `图文混排（默认）`
+    - `整图公式`
+  - 选择 **`公式模型档位`**
+    - `plus-S（默认·更轻更快）`
+    - `plus-M（高精度）`
+- 当前产品化范围：
+  - 识别结果会回写到现有 textBlocks，普通预览/导出链路可直接复用
+  - `regions` / `formula` 结构结果同时保留，供后续公式渲染 UI / 导出增强继续接
+- 当前不做：
+  - 公式可视化渲染 UI
+  - 最终 PDF / Markdown 公式排版体验
 
 ## 已知约束（务必阅读）
 - **MKLDNN 默认开启（已修复）**：paddle 3.3.x 的 oneDNN 在 Windows/CPU 下推理期崩溃
@@ -120,6 +134,8 @@
   OpenVINO EP 本机不可用。
 - **语言 → 模型代自动回退**：PP-OCRv6 覆盖 简/繁/英/日 + 拉丁语系；**韩文、俄文 v6 不支持，
   自动回退到 PP-OCRv5**（同为本代最新多语模型，识别正常）。
+- **v6 档位策略**：`medium` 仍是默认；`small` 仅改变 PP-OCRv6 的 det/rec 模型，
+  不改变语言回退规则，也不会影响 v5/v4 的兜底逻辑。
 - **俄文键是 `ru`**：paddleocr 3.x 的俄文用户态 lang 码是 `ru`（内部映射 `cyrillic`），
   旧文档写的 `cyrillic` 会报错，本插件已做映射。
 - **CPU 推理速度**：纯 CPU，大图较慢属正常；可在设置里调大「限制图像边长」或「线程数」。

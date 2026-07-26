@@ -7,6 +7,7 @@ import psutil  # 进程检查
 from platform import system  # 平台检查
 
 from call_func import CallFunc
+from .install_status import build_init_fail_message
 from .PPOCR_api import PPOCR_pipe
 
 # 引擎可执行文件（入口）名称
@@ -53,6 +54,21 @@ class Api:  # 公开接口
         - 三态 'global' 或缺失 → 沿用全局 bool；'on'→True；'off'→False。
         """
         cfg = {}
+        def _resolve_local_bool(localKey, globalBool):
+            lv = (localData or {}).get(localKey)
+            if lv == "on" or lv is True:
+                return True
+            if lv == "off":
+                return False
+            # "global"(默认) / 缺失 / 旧版脏值 → 沿用全局
+            return globalBool
+
+        def _resolve_local_text(localKey, globalValue):
+            lv = (localData or {}).get(localKey)
+            if lv in (None, "", "global"):
+                return globalValue
+            return lv
+
         # ── 直接透传（全局项）──
         if "engine" in globalData:
             cfg["engine"] = globalData["engine"]
@@ -61,10 +77,37 @@ class Api:  # 公开接口
             "model_version.ocr_version"
         )
         if _ver:
-            cfg["ocr_version"] = _ver
+            _ver = str(_ver).strip()
+            if _ver in {"PP-OCRv6-medium", "PP-OCRv6:medium"}:
+                cfg["ocr_version"] = "PP-OCRv6"
+                cfg["v6_model_size"] = "medium"
+            elif _ver in {"PP-OCRv6-small", "PP-OCRv6:small"}:
+                cfg["ocr_version"] = "PP-OCRv6"
+                cfg["v6_model_size"] = "small"
+            else:
+                cfg["ocr_version"] = _ver
+        _v6_size = globalData.get("v6_model_size") or globalData.get(
+            "model_version.v6_model_size"
+        )
+        if _v6_size and "v6_model_size" not in cfg:
+            cfg["v6_model_size"] = _v6_size
         if "cpu_threads" in globalData:
             cfg["cpu_threads"] = globalData["cpu_threads"]
         cfg["table_structure"] = bool(globalData.get("table_structure", False))
+        g_formula_enabled = bool(globalData.get("formula_recognition", False))
+        cfg["formula_recognition"] = _resolve_local_bool(
+            "formula_recognition", g_formula_enabled
+        )
+        _formula_mode = _resolve_local_text(
+            "formula_mode", globalData.get("formula_mode")
+        )
+        if _formula_mode:
+            cfg["formula_mode"] = _formula_mode
+        _formula_model = _resolve_local_text(
+            "formula_model_name", globalData.get("formula_model_name")
+        )
+        if _formula_model:
+            cfg["formula_model_name"] = _formula_model
         # ── 语言 / 限制边长（局部项，仅窗口级有）──
         lang = (localData or {}).get("language")
         if lang:
@@ -130,7 +173,8 @@ class Api:  # 公开接口
             self.api = PPOCR_pipe(ExePath, argument=tempConfigs)
         except Exception as e:
             self.api = None
-            return f"[Error] OCR init fail. Argd: {tempConfigs}\n{e}"
+            detail = build_init_fail_message(tempConfigs, e)
+            return f"[Error] OCR init fail. Argd: {tempConfigs}\n{detail}"
         return ""
 
     def stop(self):  # 停止引擎（必须不抛错，否则语言切换/重配会卡死任务线程）
@@ -144,8 +188,15 @@ class Api:  # 公开接口
 
     def runPath(self, imgPath: str, task="ocr"):  # 路径识图
         self.__runBefore()
+        engine_task = None
         if task == "table" and self.exeConfigs.get("table_structure"):
-            res = self.api.runDict({"image_path": imgPath, "task": "table"})
+            engine_task = "table"
+        elif task in {"formula", "formula_layout"} and self.exeConfigs.get(
+            "formula_recognition"
+        ):
+            engine_task = task
+        if engine_task:
+            res = self.api.runDict({"image_path": imgPath, "task": engine_task})
         else:
             res = self.api.run(imgPath)
         self.__ramClear()
@@ -153,15 +204,27 @@ class Api:  # 公开接口
 
     def runBytes(self, imageBytes, task="ocr"):  # 字节流
         self.__runBefore()
-        table_task = "table" if task == "table" and self.exeConfigs.get("table_structure") else None
-        res = self.api.runBytes(imageBytes, task=table_task)
+        engine_task = None
+        if task == "table" and self.exeConfigs.get("table_structure"):
+            engine_task = "table"
+        elif task in {"formula", "formula_layout"} and self.exeConfigs.get(
+            "formula_recognition"
+        ):
+            engine_task = task
+        res = self.api.runBytes(imageBytes, task=engine_task)
         self.__ramClear()
         return res
 
     def runBase64(self, imageBase64, task="ocr"):  # base64字符串
         self.__runBefore()
-        table_task = "table" if task == "table" and self.exeConfigs.get("table_structure") else None
-        res = self.api.runBase64(imageBase64, task=table_task)
+        engine_task = None
+        if task == "table" and self.exeConfigs.get("table_structure"):
+            engine_task = "table"
+        elif task in {"formula", "formula_layout"} and self.exeConfigs.get(
+            "formula_recognition"
+        ):
+            engine_task = task
+        res = self.api.runBase64(imageBase64, task=engine_task)
         self.__ramClear()
         return res
 

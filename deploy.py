@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 import os, sys
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 PLUGIN = os.path.join(ROOT, "Umi-OCR", "UmiOCR-data", "plugins", "win_x64_PaddleOCR_Py")
 PY = os.path.join(PLUGIN, ".venv_gpu", "Scripts", "python.exe")
@@ -13,9 +19,9 @@ SELF_TEST = "--selftest" in sys.argv
 
 MENU = (
     "\n[3/3] 选择预下载的模型范围：\n"
-    "[1] 完整版   : V4 + V6 + V5多语言 · ONNX + MKL-DNN  ~最大\n"
-    "[2] 最小可用 : PP-OCRv6（中文）· 仅 ONNX            ~最小\n"
-    "[3] 多语言   : V6 + V5多语言 · 仅 ONNX              ~中等\n"
+    "[1] 完整版   : V4 + V6(medium+small) + V5多语言 · ONNX + MKL-DNN  ~最大\n"
+    "[2] 最小可用 : PP-OCRv6 中文（medium+small）· 仅 ONNX             ~最小\n"
+    "[3] 多语言   : V6(medium+small) + V5多语言 · 仅 ONNX               ~中等\n"
     "（直接回车 = 选项2）\n"
 )
 
@@ -27,16 +33,29 @@ MENU = (
 SCOPES = {
     "1": {
         "engines": ["paddle", "onnx"],
-        "ocr": [("PP-OCRv4", "ch"), ("PP-OCRv6", "ch"),
-                ("PP-OCRv5", "eslav"), ("PP-OCRv5", "korean")],
+        "ocr": [
+            {"ver": "PP-OCRv4", "lang": "ch"},
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "medium"},
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "small"},
+            {"ver": "PP-OCRv5", "lang": "eslav"},
+            {"ver": "PP-OCRv5", "lang": "korean"},
+        ],
     },
     "2": {
         "engines": ["onnx"],
-        "ocr": [("PP-OCRv6", "ch")],
+        "ocr": [
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "medium"},
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "small"},
+        ],
     },
     "3": {
         "engines": ["onnx"],
-        "ocr": [("PP-OCRv6", "ch"), ("PP-OCRv5", "eslav"), ("PP-OCRv5", "korean")],
+        "ocr": [
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "medium"},
+            {"ver": "PP-OCRv6", "lang": "ch", "v6_model_size": "small"},
+            {"ver": "PP-OCRv5", "lang": "eslav"},
+            {"ver": "PP-OCRv5", "lang": "korean"},
+        ],
     },
 }
 
@@ -45,7 +64,7 @@ def log(msg):
     print(msg, flush=True)
 
 
-def download(ver, lang, engine, with_tools):
+def download(ver, lang, engine, with_tools, v6_model_size=None):
     """下载某 (ocr_version, lang) 的模型。
     engine='onnx' 下 ONNX 版；engine='paddle' 下 PADDLE(MKLDNN) 版。
     with_tools=True 时一并强制下载三个工具模型
@@ -54,10 +73,13 @@ def download(ver, lang, engine, with_tools):
     故 V5 调用会顺带拉下 server-det（选项3 所需）。
     """
     tag = "onnx" if engine == "onnx" else "paddle"
+    profile = ver
+    if ver == "PP-OCRv6":
+        profile = f"{ver}-{(v6_model_size or 'medium')}"
     log("[下载] %s / lang=%s (engine=%s%s) ..." % (
-        ver, lang, tag, " + 工具模型" if with_tools else ""))
+        profile, lang, tag, " + 工具模型" if with_tools else ""))
     if SELF_TEST:
-        log("  [OK-selftest] %s/%s/%s 跳过真实下载" % (ver, lang, tag))
+        log("  [OK-selftest] %s/%s/%s 跳过真实下载" % (profile, lang, tag))
         return
     try:
         from model_sources import configure_domestic_model_sources
@@ -73,14 +95,17 @@ def download(ver, lang, engine, with_tools):
             enable_mkldnn=(engine == "paddle"),
             cpu_threads=6,
         )
+        if ver == "PP-OCRv6" and (v6_model_size or "medium") == "small":
+            kwargs["text_detection_model_name"] = "PP-OCRv6_small_det"
+            kwargs["text_recognition_model_name"] = "PP-OCRv6_small_rec"
         if engine == "onnx":
             kwargs["engine"] = "onnxruntime"
             kwargs["engine_config"] = {"providers": ["CPUExecutionProvider"]}
         paddleocr.PaddleOCR(**kwargs)
-        log("  [OK] %s/%s/%s 已就绪。" % (ver, lang, tag))
+        log("  [OK] %s/%s/%s 已就绪。" % (profile, lang, tag))
     except Exception as e:
         log("  [提示] %s/%s/%s 未完成（可能离线），首次识别会自动下载：%s"
-            % (ver, lang, tag, e))
+            % (profile, lang, tag, e))
 
 
 def main():
@@ -116,9 +141,18 @@ def main():
     log("（按选项 %s 下载）" % choice)
     for engine in spec["engines"]:
         n = len(spec["ocr"])
-        for idx, (ver, lang) in enumerate(spec["ocr"]):
+        for idx, item in enumerate(spec["ocr"]):
+            ver = item["ver"]
+            lang = item["lang"]
+            v6_model_size = item.get("v6_model_size")
             # 工具模型随该引擎最后一个 ocr 对一起下（保证三个工具模型必下）
-            download(ver, lang, engine, with_tools=(idx == n - 1))
+            download(
+                ver,
+                lang,
+                engine,
+                with_tools=(idx == n - 1),
+                v6_model_size=v6_model_size,
+            )
 
 
 if __name__ == "__main__":
