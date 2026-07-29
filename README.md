@@ -21,16 +21,6 @@
     [`patches/umi-host/apply_host_patches.bat`](./patches/umi-host/apply_host_patches.bat)
     （可拖入 `Umi-OCR` 目录；会先备份再覆盖 25 个宿主/插件文件）
 
----
-
-## v1.4：P1 公式识别（可选）
-
-- 先运行根目录 `install_formula_models.bat`，再到 **全局设置 → 文字识别** 开启 **`公式识别（P1·可选）`**。
-- 默认使用 `PP-FormulaNet_plus-S`；“混排公式区域”会额外使用 `PP-DocLayout_plus-L` 定位页面内的公式，也可切换为“整图公式”。
-- 公式模型不塞进基础包。离线使用时，把 `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` 解压到**同版本 v1.4** CPU 懒人包根目录即可。
-- 旧 v1.3.x 懒人包只有旧代码，不能只补公式模型；需要先换用 v1.4 CPU 懒人包。普通文字截图会跳过公式版面管线。
-- 当前先提供公式识别与结果回传；公式可视化渲染、PDF / Markdown 公式排版留待后续增强。
-
 ## 项目简介
 
 ### 关于 Umi-OCR（原项目）
@@ -380,7 +370,15 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 
 ## 更新日志
 
-版本号写在仓库根目录 **`VERSION`**（当前 **`1.3`**）。
+版本号写在仓库根目录 **`VERSION`**（当前 **`1.4`**）。
+
+### v1.4（2026-07-26）·P1 公式识别（可选）
+
+- 先运行根目录 `install_formula_models.bat`，再到 **全局设置 → 文字识别** 开启 **`公式识别（P1·可选）`**。
+- 默认使用 `PP-FormulaNet_plus-S`；“混排公式区域”会额外使用 `PP-DocLayout_plus-L` 定位页面内的公式，也可切换为“整图公式”。
+- 公式模型不塞进基础包。离线使用时，把 `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` 解压到**同版本 v1.4** CPU 懒人包根目录即可。
+- 旧 v1.3.x 懒人包只有旧代码，不能只补公式模型；需要先换用 v1.4 CPU 懒人包。普通文字截图会跳过公式版面管线。
+- 当前先提供公式识别与结果回传；公式可视化渲染、PDF / Markdown 公式排版留待后续增强。
 
 ### v1.3（2026-07-24）
 
