@@ -2,7 +2,7 @@
 
 **Umi-OCR 本地 PP-OCRv6 引擎插件**（Route B：Python 插件调用官方 PaddleOCR 3.x）
 
-[![Version](https://img.shields.io/badge/version-1.4.1-orange)](./VERSION)
+[![Version](https://img.shields.io/badge/version-1.4.2-orange)](./VERSION)
 [![Umi-OCR](https://img.shields.io/badge/Umi--OCR-v2.1.5-blue)](https://github.com/hiroi-sora/Umi-OCR)
 [![PaddleOCR](https://img.shields.io/badge/PaddleOCR-3.7-green)](https://github.com/PaddlePaddle/PaddleOCR)
 [![Python](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/)
@@ -10,11 +10,11 @@
 
 面向 [Umi-OCR](https://github.com/hiroi-sora/Umi-OCR) 的**本地离线**新引擎插件：在**不改主程序**的前提下，把识别能力从内置老旧 PP-OCRv3，升级到官方 **PaddleOCR 3.x（PP-OCRv6 / v5 / v4）**，并支持 **ONNX CPU / ONNX CUDA GPU / Paddle+MKLDNN** 三种推理后端。
 
-- **当前源码版本**：**1.4.1**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
+- **当前源码版本**：**1.4.2**（见仓库根目录 [`VERSION`](./VERSION)；开发以 **`master`** 为准）
 - **本仓库（源码）**：<https://github.com/chapterv/umi-paddle-neoengine>  
 - **完整发布包**（含 Umi 主程序 + `setup.bat`）：同级目录 **`umi-paddle-neoengine-release/`**（zip **不进**本 git 仓库）  
-  - `umi-paddle-neoengine-deploy-v1.4.zip` — 纯净部署（需 `setup.bat`）
-  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip` — 自带完整便携 Python 的 ONNX V6 CPU 懒人包
+  - `umi-paddle-neoengine-deploy-v1.4.2.zip` — 纯净部署（需 `setup.bat`）
+  - `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.2.zip` — 自带完整便携 Python 的 ONNX V6 CPU 懒人包
   - `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` — 同版本懒人包的可选公式模型增量包
 - **宿主补丁（主程序 py_src 修复）**：[`patches/umi-host/`](./patches/umi-host/)
   - 完整 zip 已内嵌；若只装插件、主程序仍是官方原版，请运行
@@ -223,8 +223,8 @@ Umi-OCR 本体长期自带的本地引擎仍是 **PaddleOCR-json + 较老的 PP-
 ### 方式 A：完整发布包（推荐最终用户）
 
 1. 从 `umi-paddle-neoengine-release/` 取 zip：  
-   - **`umi-paddle-neoengine-deploy-v1.4.zip`**：小包，需联网 `setup.bat`
-   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip`**：含完整便携 Python + V6 ONNX 模型，默认 ONNX CPU
+   - **`umi-paddle-neoengine-deploy-v1.4.2.zip`**：小包，需联网 `setup.bat`
+   - **`umi-paddle-neoengine-ONNX-V6-CPU-v1.4.2.zip`**：含完整便携 Python + V6 ONNX 模型，默认 ONNX CPU
 2. 解压到**尽量纯英文路径**（如 `C:\Local-Ocr\`；中文路径下 paddle 原生更易出问题，ONNX 相对稳）  
 3. 纯净包：双击根目录 **`setup.bat`**  
    - 模型范围：默认「最小可用 = 中文 V6 ONNX」即可  
@@ -370,7 +370,16 @@ P1 适合复杂有线/无线表和合并表头。先通过 `setup.bat` 第 4 步
 
 ## 更新日志
 
-版本号写在仓库根目录 **`VERSION`**（当前 **`1.4.1`**）。
+版本号写在仓库根目录 **`VERSION`**（当前 **`1.4.2`**）。
+
+### v1.4.2（2026-07-30）·首次识别 404 / 904 修复
+
+- 修复首次截图时，方向纠正误加载整套 UVDoc，模型站返回 404 后又把
+  `<Response [404]>` 写进识别结果通道，导致 Umi 反序列化 JSON 报 904。
+- 方向判断改为直接使用 CPU 懒人包内置的 ONNX 小模型，不再联网加载 UVDoc；
+  文档展平仍走原有 OpenCV 几何矫正，功能开关和识别策略不变。
+- 管道会把第三方库误写到 stdout 的诊断行转存到错误日志，再继续等待合法 JSON，
+  避免类似日志再次中断识别。
 
 ### v1.4.1（2026-07-30）·CPU 懒人包可移植性修复
 

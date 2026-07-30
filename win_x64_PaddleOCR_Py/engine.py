@@ -706,25 +706,36 @@ def convert(result, was_padded=True):
 _DOC_PREP_PIPE = None   # None=未建；False=加载失败哨兵
 
 def _load_doc_ori():
-    """惰性构建 doc_preprocessor 管线（仅用于取「方向角度」）。
+    """惰性构建文档方向分类器（仅用于取「方向角度」）。
 
-    为何用整条管线而非直接 jit 加载 PP-LCNet 分类模型：
-      paddleocr 3.x 把方向分类模型打包成**推理图**，
-      `paddle.jit.load` 直接加载会报 KeyError('forward')（没有可直接调用的 Layer）。
-      而 doc_preprocessor 管线由 paddlex 自己负责加载，能正确返回 angle。
-      ⚠️ 该管线内部也含 UVDoc 去扭曲——但我们**只用 angle**，
-         绝不取它的 output_img（那会重新引入「框不回原图」的偏移 bug）。
-         去扭曲由本引擎的 cv2 透视矫正 + 精确逆映射完成。
+    旧实现创建整条 doc_preprocessor 管线，即使这里只需要方向角度，也会
+    初始化并下载 UVDoc。模型源偶发 404 时，requests.Response 还可能污染
+    stdout JSON 协议。现在直接加载懒人包已内置的 ONNX 方向模型；去扭曲仍
+    由本引擎的 cv2 透视矫正 + 精确逆映射完成。
     """
     global _DOC_PREP_PIPE
     if _DOC_PREP_PIPE is not None:
         return _DOC_PREP_PIPE
     try:
-        from paddlex import create_pipeline
-        _DOC_PREP_PIPE = create_pipeline(pipeline="doc_preprocessor")
-        sys.stderr.write("[preproc] doc_preprocessor 管线（取方向角度）已加载。\n")
+        from paddlex import create_predictor
+
+        model_dir = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            "paddlex",
+            "official_models",
+            "PP-LCNet_x1_0_doc_ori_onnx",
+        )
+        if not os.path.isfile(os.path.join(model_dir, "inference.onnx")):
+            raise FileNotFoundError(f"方向模型缺失：{model_dir}")
+        _DOC_PREP_PIPE = create_predictor(
+            model_name="PP-LCNet_x1_0_doc_ori",
+            model_dir=model_dir,
+            engine="onnxruntime",
+            engine_config={"providers": ["CPUExecutionProvider"]},
+        )
+        sys.stderr.write("[preproc] ONNX 文档方向分类器已加载。\n")
     except Exception as e:
-        sys.stderr.write(f"[preproc][WARN] doc_preprocessor 管线加载失败，方向纠正将跳过：{e}\n")
+        sys.stderr.write(f"[preproc][WARN] 文档方向分类器加载失败，方向纠正将跳过：{e}\n")
         _DOC_PREP_PIPE = False
     return _DOC_PREP_PIPE
 
@@ -736,7 +747,8 @@ def _classify_orientation(img_bgr):
         return 0
     try:
         r = next(iter(pipe.predict(img_bgr)))
-        return int(r.get("angle", 0))
+        labels = r.get("label_names") or []
+        return int(labels[0]) if labels else 0
     except Exception as e:
         sys.stderr.write(f"[preproc][WARN] 方向分类失败，按 0° 处理：{e}\n")
         return 0

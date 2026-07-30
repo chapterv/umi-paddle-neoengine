@@ -1,18 +1,29 @@
 # Local-Ocr · Umi-OCR 新引擎（PP-OCRv6）发布包
 
-**当前版本：1.4.1**（与源码仓 `VERSION` 对齐）
+**当前版本：1.4.2**（与源码仓 `VERSION` 对齐）
 
 把 Umi-OCR v2.1.5 内置的 PP-OCRv3 引擎，升级为官方最新 **PaddleOCR 3.x** 路线
 （推荐 **PP-OCRv6 medium** + **ONNX Runtime**，现也可切 **v6 small**、v5/v4 与 Paddle/MKLDNN）。
 
-> **v1.4.1**：修复 CPU 懒人包把 Python 绝对路径写死在打包机器上的问题；
-> 现在包含完整便携 CPython，其他 Windows 用户解压后无需安装 Python 即可启动。
+> **v1.4.2**：修复首次截图识别时，文档预处理模型下载 404 污染 JSON 管道并
+> 导致异常状态码 904；CPU 懒人包仍包含完整便携 CPython，解压即可启动。
 > 锁定 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 在 Windows/CPU 下易崩，勿擅自升级）。  
 > 公开源码：<https://github.com/chapterv/umi-paddle-neoengine>
 
 ---
 
 ## 更新日志
+
+### v1.4.2（2026-07-30）
+
+- **修复首次截图识别报 904，原始内容为 `<Response [404]>`**
+  - OCR 主模型其实已经正常初始化；问题出在“文档方向纠正”只想判断页面旋转角度，
+    却连带初始化了 UVDoc。模型站缺文件返回 404 时，下载器把 HTTP Response
+    打印到了本应只传 JSON 的识别通道。
+  - 方向判断现在直接读取包内已有的 `PP-LCNet_x1_0_doc_ori_onnx`，不再联网加载
+    UVDoc。文档去扭曲继续使用原有 OpenCV 几何矫正，开关和识别效果策略不变。
+  - 管道会忽略并记录第三方库误写到 stdout 的诊断行，继续读取真正的 JSON，
+    避免类似日志再次被 Umi 误判为识别结果。
 
 ### v1.4.1（2026-07-30）
 
@@ -136,15 +147,15 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 
 ---
 
-## 当前发布包（v1.4.1）
+## 当前发布包（v1.4.2）
 
 输出目录：同级 **`umi-paddle-neoengine-release/`**
 
 | 包 | 引擎默认 | 包含 | 解压后 | 适合 |
 |----|------|------|--------|------|
-| **umi-paddle-neoengine-deploy-v1.4.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
-| **umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip** | ONNX CPU | 完整便携 CPython + V6 ONNX 模型与公式功能代码 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
-| **umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip** | — | `PP-FormulaNet_plus-S` + 混排版面模型；兼容 v1.4.1 | 解压到 v1.4.1 CPU 懒人包根目录 | 可选离线公式识别 |
+| **umi-paddle-neoengine-deploy-v1.4.2.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
+| **umi-paddle-neoengine-ONNX-V6-CPU-v1.4.2.zip** | ONNX CPU | 完整便携 CPython + V6 ONNX 模型与公式功能代码 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
+| **umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip** | — | `PP-FormulaNet_plus-S` + 混排版面模型；兼容 v1.4.2 | 解压到 v1.4.2 CPU 懒人包根目录 | 可选离线公式识别 |
 
 > 历史包名（`Local-Ocr_*_简洁版/懒人版` 等）已废弃，请使用上表两个文件名。  
 > 懒人包模型缓存在插件内 `paddlex/`，自包含。
@@ -201,7 +212,7 @@ install_formula_models.bat
 
 ## 懒人版 用法（两个引擎版通用）
 
-1. 解压 `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip`（较大，含完整便携 Python 环境与基础模型）
+1. 解压 `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.2.zip`（较大，含完整便携 Python 环境与基础模型）
 2. 直接双击 `Umi-OCR\Umi-OCR.exe`
 3. 「全局设置 → 文字识别」里选 **PaddleOCR·PP-OCRv6/v4（新引擎）**
 4. 拖入图片即可，**无需联网、无需装任何东西**

@@ -170,31 +170,56 @@ class PPOCR_pipe:  # 调用OCR（管道模式）
                 "code": 902,
                 "data": f"向识别器进程传入指令失败，疑似子进程已崩溃。{e}",
             }
-        # 从唯一队列读结果（带超时）。超时必须 kill 引擎，否则下次请求仍卡死，
-        # 且 Umi-OCR 的 stop 只在 msnTask 返回后检查——不返回就永远停不了。
-        getStr = self._read_line(_READ_TIMEOUT)
-        if getStr is None:
-            # 超时：强制结束引擎，让上层能结束任务、允许用户重试
+        # 从唯一队列读结果（带总超时）。部分第三方模型下载器会误把
+        # ``<Response [404]>`` 或进度提示写进 stdout；这些不是协议结果，
+        # 记录到 stderr 后继续等待真正的 JSON，避免宿主误报 904。
+        deadline = time.time() + _READ_TIMEOUT
+        noise_lines = []
+        while True:
+            remain = deadline - time.time()
+            if remain <= 0:
+                try:
+                    self.exit()
+                except Exception:
+                    pass
+                suffix = (
+                    f"；已忽略的非JSON输出：{' | '.join(noise_lines[-5:])}"
+                    if noise_lines
+                    else ""
+                )
+                return {
+                    "code": 902,
+                    "data": (
+                        f"识别超时（>{_READ_TIMEOUT}s），引擎可能卡死，已强制终止引擎进程。"
+                        f"请重试；仍失败请查看 engine_stderr.log{suffix}。"
+                    ),
+                }
+
+            getStr = self._read_line(remain)
+            if getStr is None:
+                continue
+            if getStr == "":
+                suffix = (
+                    f"；此前收到非JSON输出：{' | '.join(noise_lines[-5:])}"
+                    if noise_lines
+                    else ""
+                )
+                return {
+                    "code": 902,
+                    "data": f"子进程已退出（stdout EOF），无识别结果{suffix}。",
+                }
             try:
-                self.exit()
+                return jsonLoads(getStr)
             except Exception:
-                pass
-            return {
-                "code": 902,
-                "data": (
-                    f"识别超时（>{_READ_TIMEOUT}s），引擎可能卡死，已强制终止引擎进程。"
-                    f"请重试；仍失败请查看 engine_stderr.log。"
-                ),
-            }
-        if getStr == "":
-            return {"code": 902, "data": "子进程已退出（stdout EOF），无识别结果。"}
-        try:
-            return jsonLoads(getStr)
-        except Exception as e:
-            return {
-                "code": 904,
-                "data": f"识别器输出值反序列化JSON失败。异常信息：[{e}]。原始内容：[{getStr}]",
-            }
+                clean = getStr.strip()
+                if clean:
+                    noise_lines.append(clean)
+                    try:
+                        if self._stderr_fd:
+                            self._stderr_fd.write(f"[stdout-noise] {clean}\n")
+                            self._stderr_fd.flush()
+                    except Exception:
+                        pass
 
     def run(self, imgPath: str, task=None):
         """对一张本地图片进行文字识别。\n
