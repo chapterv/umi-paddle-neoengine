@@ -52,14 +52,26 @@ set "PY="
 if defined TABLE_PY if exist "%TABLE_PY%" set "PY=%TABLE_PY%"
 if defined FORMULA_PY if exist "%FORMULA_PY%" set "PY=%FORMULA_PY%"
 
+if not defined PY if exist "%PLUGIN%\.venv_gpu\python.exe" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\paddleocr" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\onnxruntime" (
+  set "PY=%PLUGIN%\.venv_gpu\python.exe"
+)
 if not defined PY if exist "%PLUGIN%\.venv_gpu\Scripts\python.exe" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\paddleocr" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\onnxruntime" (
   set "PY=%PLUGIN%\.venv_gpu\Scripts\python.exe"
+)
+if not defined PY if exist "%PLUGIN%\.venv\python.exe" if exist "%PLUGIN%\.venv\Lib\site-packages\paddleocr" if exist "%PLUGIN%\.venv\Lib\site-packages\onnxruntime" (
+  set "PY=%PLUGIN%\.venv\python.exe"
 )
 if not defined PY if exist "%PLUGIN%\.venv\Scripts\python.exe" if exist "%PLUGIN%\.venv\Lib\site-packages\paddleocr" if exist "%PLUGIN%\.venv\Lib\site-packages\onnxruntime" (
   set "PY=%PLUGIN%\.venv\Scripts\python.exe"
 )
+if not defined PY if exist "%PLUGIN%\.venv_gpu\python.exe" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\paddleocr" (
+  set "PY=%PLUGIN%\.venv_gpu\python.exe"
+)
 if not defined PY if exist "%PLUGIN%\.venv_gpu\Scripts\python.exe" if exist "%PLUGIN%\.venv_gpu\Lib\site-packages\paddleocr" (
   set "PY=%PLUGIN%\.venv_gpu\Scripts\python.exe"
+)
+if not defined PY if exist "%PLUGIN%\.venv\python.exe" if exist "%PLUGIN%\.venv\Lib\site-packages\paddleocr" (
+  set "PY=%PLUGIN%\.venv\python.exe"
 )
 if not defined PY if exist "%PLUGIN%\.venv\Scripts\python.exe" if exist "%PLUGIN%\.venv\Lib\site-packages\paddleocr" (
   set "PY=%PLUGIN%\.venv\Scripts\python.exe"

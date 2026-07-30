@@ -203,6 +203,7 @@ def summarize_status(path: Path = STATUS_FILE) -> str:
 def build_init_fail_message(configs: dict, raw_error: object, path: Path = STATUS_FILE) -> str:
     raw = str(raw_error or "")
     lower = raw.lower()
+    status_recorded = path.exists()
     data = load_status(path)
     engine = str(configs.get("engine") or "onnxruntime").strip().lower()
     envs = data.get("envs", {})
@@ -217,6 +218,13 @@ def build_init_fail_message(configs: dict, raw_error: object, path: Path = STATU
 
     def _has_cuda(entry: dict) -> bool:
         return "CUDAExecutionProvider" in (entry.get("providers") or [])
+
+    if not status_recorded and lower.strip() in {"ocr init fail.", "ocr init fail"}:
+        return (
+            "OCR 子进程未能启动，且当前包没有安装状态记录。\n"
+            "请先在插件目录运行内置 Python 的 --version；若无法启动，说明发布包运行时不完整或被安全软件拦截。\n"
+            f"原始错误：{raw}"
+        )
 
     if not _is_complete(gpu) and not _is_complete(cpu):
         return (

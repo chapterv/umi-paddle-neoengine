@@ -1,19 +1,29 @@
 # Local-Ocr · Umi-OCR 新引擎（PP-OCRv6）发布包
 
-**当前版本：1.4**（与源码仓 `VERSION` 对齐）
+**当前版本：1.4.1**（与源码仓 `VERSION` 对齐）
 
 把 Umi-OCR v2.1.5 内置的 PP-OCRv3 引擎，升级为官方最新 **PaddleOCR 3.x** 路线
 （推荐 **PP-OCRv6 medium** + **ONNX Runtime**，现也可切 **v6 small**、v5/v4 与 Paddle/MKLDNN）。
 
-> **v1.4**：新增按需安装的 P1 公式识别。默认使用轻量
-> `PP-FormulaNet_plus-S`，可识别整图公式或图文混排中的公式区域；普通 OCR
-> 默认不加载这条管线。
+> **v1.4.1**：修复 CPU 懒人包把 Python 绝对路径写死在打包机器上的问题；
+> 现在包含完整便携 CPython，其他 Windows 用户解压后无需安装 Python 即可启动。
 > 锁定 **`paddlepaddle==3.2.1`**（3.3.x oneDNN 在 Windows/CPU 下易崩，勿擅自升级）。  
 > 公开源码：<https://github.com/chapterv/umi-paddle-neoengine>
 
 ---
 
 ## 更新日志
+
+### v1.4.1（2026-07-30）
+
+- **CPU 懒人包真正做到解压即用**
+  - v1.4 包里的普通 Windows venv 仍引用创建者电脑的
+    `C:\Users\Christopher\...\Python310`，因此打包机器能用，换一台电脑就会
+    在 OCR 子进程启动阶段报 `OCR init fail`。
+  - v1.4.1 将完整 CPython 可执行文件、运行 DLL 与标准库合并到插件 `.venv`，
+    启动器直接调用 `.venv\python.exe`；不再依赖系统 Python、用户名或原始安装路径。
+  - 打包审计会强制检查 `python.exe`、`python3x.dll` 和标准库，缺少任一项都不能发布。
+  - 初始化提示会区分“内置 Python 没启动”和“Python 已启动但缺依赖”，方便继续排查安全软件拦截等少数情况。
 
 ### v1.4（2026-07-26）
 
@@ -126,15 +136,15 @@ patches\umi-host\apply_host_patches.bat "你的\Umi-OCR路径"
 
 ---
 
-## 当前发布包（v1.4）
+## 当前发布包（v1.4.1）
 
 输出目录：同级 **`umi-paddle-neoengine-release/`**
 
 | 包 | 引擎默认 | 包含 | 解压后 | 适合 |
 |----|------|------|--------|------|
 | **umi-paddle-neoengine-deploy-v1.4.zip** | ONNX CPU | 源码 + setup.bat（**不含** venv / 模型） | 双击 `setup.bat` → 打开 Umi-OCR | 有网、最小包 |
-| **umi-paddle-neoengine-ONNX-V6-CPU-v1.4.zip** | ONNX CPU | 含精简 `.venv` + V6 ONNX 等模型与公式功能代码 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
-| **umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip** | — | `PP-FormulaNet_plus-S` + 混排版面模型 | 解压到 v1.4 CPU 懒人包根目录 | 可选离线公式识别 |
+| **umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip** | ONNX CPU | 完整便携 CPython + V6 ONNX 模型与公式功能代码 | 直接双击 `Umi-OCR\Umi-OCR.exe` | 懒人 / 离线 |
+| **umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip** | — | `PP-FormulaNet_plus-S` + 混排版面模型；兼容 v1.4.1 | 解压到 v1.4.1 CPU 懒人包根目录 | 可选离线公式识别 |
 
 > 历史包名（`Local-Ocr_*_简洁版/懒人版` 等）已废弃，请使用上表两个文件名。  
 > 懒人包模型缓存在插件内 `paddlex/`，自包含。
@@ -191,13 +201,13 @@ install_formula_models.bat
 
 ## 懒人版 用法（两个引擎版通用）
 
-1. 解压 `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.zip`（较大，含完整 Python 环境与基础模型）
+1. 解压 `umi-paddle-neoengine-ONNX-V6-CPU-v1.4.1.zip`（较大，含完整便携 Python 环境与基础模型）
 2. 直接双击 `Umi-OCR\Umi-OCR.exe`
 3. 「全局设置 → 文字识别」里选 **PaddleOCR·PP-OCRv6/v4（新引擎）**
 4. 拖入图片即可，**无需联网、无需装任何东西**
 
 > 懒人版的 `.venv` 是 Windows 可移植虚拟环境，换机器解压即用。
-> 若需要离线公式识别，再把 **同为 v1.4** 的
+> 若需要离线公式识别，再把兼容的 **v1.4** 公式模型增量包
 > `umi-paddle-neoengine-P1-formula-models-addon-v1.4.zip` 解压到同一根目录；
 > 旧 v1.3.x 懒人包只有模型而没有公式代码，不能只补这个增量包。
 
