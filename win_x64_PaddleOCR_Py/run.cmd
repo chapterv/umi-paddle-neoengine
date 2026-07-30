@@ -1,8 +1,11 @@
 @echo off
+chcp 65001 >nul
 REM Umi-OCR 插件入口：用本插件内独立 venv 的 python 运行 engine.py
 REM %~dp0 保证无论从哪个工作目录调用，都能定位到本插件目录
 setlocal
 set "DIR=%~dp0"
+set "PYTHONUTF8=1"
+set "PYTHONIOENCODING=utf-8"
 REM 选择 venv：优先 .venv_gpu（含 CUDA/GPU 支持），回退 .venv（纯 CPU）。
 REM ⚠️ 只检查 python.exe 不够：.venv_gpu 可能存在 python.exe 但 paddleocr 未装/损坏
 REM   （如 setup.bat GPU 分支 onnxruntime-gpu 装失败时 paddle 可能也没装上，
@@ -32,4 +35,5 @@ if not defined PY (
     exit /b 1
 )
 "%PY%" "%DIR%engine.py" %*
-endlocal
+set "RC=%ERRORLEVEL%"
+endlocal & exit /b %RC%
